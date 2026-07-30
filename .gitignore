@@ -1,9 +1,11 @@
-```
 # Environment
+.env
 .env.local
+.env.*.local
 
 # Dependencies
-node_modules/
+/vendor/
+/node_modules/
 
 # Editors
 .vscode/
@@ -18,4 +20,8 @@ build/
 # Logs and temp files
 *.log
 *.tmp
-```
+
+# Laravel
+/storage/*.key
+/public/storage
+bootstrap/cache/*
