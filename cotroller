@@ -1,0 +1,2168 @@
+# 🎮 CONTRÔLEURS & ROUTES - LARAVEL RESTAURANT
+
+Voici l'architecture complète des contrôleurs et routes, organisée par rôle et par domaine.
+
+---
+
+## 📁 1. STRUCTURE DES DOSSIERS
+
+```
+app/Http/
+├── Controllers/
+│   ├── Auth/                    # Authentification
+│   ├── Api/                     # API publique + authentifiée (pour app mobile)
+│   │   ├── V1/
+│   │   │   ├── AuthController.php
+│   │   │   ├── RestaurantController.php
+│   │   │   ├── MenuController.php
+│   │   │   ├── CommandeController.php
+│   │   │   ├── ReservationController.php
+│   │   │   ├── LivraisonController.php
+│   │   │   ├── PaiementController.php
+│   │   │   ├── ProfilController.php
+│   │   │   └── WebhookController.php
+│   ├── SuperAdmin/              # Espace super admin
+│   ├── Admin/                   # Espace admin (multi-restaurants)
+│   ├── Gerant/                  # Espace gérant (1 restaurant)
+│   │   ├── DashboardController.php
+│   │   ├── RestaurantController.php
+│   │   ├── CategorieController.php
+│   │   ├── ProduitController.php
+│   │   ├── CommandeController.php
+│   │   ├── ReservationController.php
+│   │   ├── LivraisonController.php
+│   │   ├── TableController.php
+│   │   ├── HoraireController.php
+│   │   ├── AvisController.php
+│   │   ├── CodePromoController.php
+│   │   └── StatistiqueController.php
+│   ├── Livreur/                 # Espace livreur
+│   │   ├── DashboardController.php
+│   │   ├── LivraisonController.php
+│   │   └── ProfilController.php
+│   └── Client/                  # Espace client
+│       ├── DashboardController.php
+│       ├── RestaurantController.php
+│       ├── CommandeController.php
+│       ├── ReservationController.php
+│       ├── PanierController.php
+│       ├── AdresseController.php
+│       ├── FavorisController.php
+│       ├── AvisController.php
+│       ├── PortefeuilleController.php
+│       ├── FideliteController.php
+│       ├── NotificationController.php
+│       ├── TicketController.php
+│       └── ProfilController.php
+├── Middleware/
+│   ├── RoleMiddleware.php
+│   ├── RestaurantAccessMiddleware.php
+│   ├── LivreurDisponibleMiddleware.php
+│   └── ClientVerifieMiddleware.php
+├── Requests/                    # Validation
+│   ├── Auth/
+│   ├── Api/
+│   ├── Gerant/
+│   ├── Livreur/
+│   └── Client/
+└── Resources/                   # API Resources (JSON)
+    └── V1/
+```
+
+---
+
+## 🔐 2. MIDDLEWARES PERSONNALISÉS
+
+### 2.1 `app/Http/Middleware/RoleMiddleware.php`
+
+```php
+<?php
+
+namespace App\Http\Middleware;
+
+use Closure;
+use Illuminate\Http\Request;
+
+class RoleMiddleware
+{
+    public function handle(Request $request, Closure $next, string ...$roles)
+    {
+        if (!$request->user()) {
+            return redirect()->route('login');
+        }
+
+        if (!in_array($request->user()->role->value, $roles)) {
+            abort(403, 'Accès non autorisé pour votre rôle.');
+        }
+
+        return $next($request);
+    }
+}
+```
+
+### 2.2 `app/Http/Middleware/RestaurantAccessMiddleware.php`
+
+```php
+<?php
+
+namespace App\Http\Middleware;
+
+use Closure;
+use Illuminate\Http\Request;
+
+class RestaurantAccessMiddleware
+{
+    public function handle(Request $request, Closure $next)
+    {
+        $user = $request->user();
+        $restaurantId = $request->route('restaurant') ?? $request->route('restaurant_id');
+
+        if (!$restaurantId) {
+            return $next($request);
+        }
+
+        // SuperAdmin : accès à tout
+        if ($user->estSuperAdmin()) {
+            return $next($request);
+        }
+
+        // Admin : accès aux restaurants assignés
+        if ($user->role->value === 'admin') {
+            $aAcces = $user->profilAdmin->restaurants()
+                ->where('restaurants.id', $restaurantId)
+                ->exists();
+
+            if (!$aAcces) {
+                abort(403, 'Vous n\'avez pas accès à ce restaurant.');
+            }
+
+            return $next($request);
+        }
+
+        // Gérant : accès à son restaurant uniquement
+        if ($user->role->value === 'gerant') {
+            if ($user->profilGerant->restaurant_id !== $restaurantId) {
+                abort(403, 'Vous n\'êtes pas le gérant de ce restaurant.');
+            }
+
+            return $next($request);
+        }
+
+        abort(403);
+    }
+}
+```
+
+### 2.3 `app/Http/Middleware/LivreurDisponibleMiddleware.php`
+
+```php
+<?php
+
+namespace App\Http\Middleware;
+
+use Closure;
+use Illuminate\Http\Request;
+
+class LivreurDisponibleMiddleware
+{
+    public function handle(Request $request, Closure $next)
+    {
+        $profil = $request->user()->profilLivreur;
+
+        if (!$profil || !$profil->est_disponible) {
+            return response()->json([
+                'message' => 'Vous devez être disponible pour effectuer cette action.',
+            ], 403);
+        }
+
+        return $next($request);
+    }
+}
+```
+
+### 2.4 Enregistrement dans `bootstrap/app.php`
+
+```php
+->withMiddleware(function (Middleware $middleware) {
+    $middleware->alias([
+        'role' => \App\Http\Middleware\RoleMiddleware::class,
+        'restaurant.access' => \App\Http\Middleware\RestaurantAccessMiddleware::class,
+        'livreur.disponible' => \App\Http\Middleware\LivreurDisponibleMiddleware::class,
+    ]);
+})
+```
+
+---
+
+## 🌐 3. ROUTES WEB (`routes/web.php`)
+
+```php
+<?php
+
+use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Auth\LoginController;
+use App\Http\Controllers\Auth\RegisterController;
+use App\Http\Controllers\Auth\ForgotPasswordController;
+
+// ===== PAGE D'ACCUEIL PUBLIQUE =====
+Route::get('/', function () {
+    return view('welcome');
+})->name('home');
+
+// ===== AUTHENTIFICATION (non authentifié) =====
+Route::middleware('guest')->group(function () {
+    Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login');
+    Route::post('/login', [LoginController::class, 'login']);
+    
+    Route::get('/register', [RegisterController::class, 'showRegistrationForm'])->name('register');
+    Route::post('/register', [RegisterController::class, 'register']);
+    
+    Route::get('/mot-de-passe-oublie', [ForgotPasswordController::class, 'showLinkForm'])->name('password.request');
+    Route::post('/mot-de-passe-oublie', [ForgotPasswordController::class, 'sendResetLink'])->name('password.email');
+    Route::get('/reset-password/{token}', [ForgotPasswordController::class, 'showResetForm'])->name('password.reset');
+    Route::post('/reset-password', [ForgotPasswordController::class, 'reset'])->name('password.update');
+});
+
+// ===== ROUTES AUTHENTIFIÉES =====
+Route::middleware('auth')->group(function () {
+    Route::post('/logout', [LoginController::class, 'logout'])->name('logout');
+
+    // Redirection selon le rôle après login
+    Route::get('/dashboard', function () {
+        return match(auth()->user()->role->value) {
+            'superadmin' => redirect()->route('superadmin.dashboard'),
+            'admin' => redirect()->route('admin.dashboard'),
+            'gerant' => redirect()->route('gerant.dashboard'),
+            'livreur' => redirect()->route('livreur.dashboard'),
+            'client' => redirect()->route('client.dashboard'),
+        };
+    })->name('dashboard');
+
+    // ===== ESPACE SUPERADMIN =====
+    Route::prefix('superadmin')
+        ->name('superadmin.')
+        ->middleware('role:superadmin')
+        ->group(function () {
+            Route::get('/dashboard', [\App\Http\Controllers\SuperAdmin\DashboardController::class, 'index'])->name('dashboard');
+            Route::resource('restaurants', \App\Http\Controllers\SuperAdmin\RestaurantController::class);
+            Route::resource('utilisateurs', \App\Http\Controllers\SuperAdmin\UtilisateurController::class);
+            Route::get('/statistiques', [\App\Http\Controllers\SuperAdmin\StatistiqueController::class, 'index'])->name('statistiques');
+            Route::get('/parametres', [\App\Http\Controllers\SuperAdmin\ParametreController::class, 'index'])->name('parametres');
+            Route::put('/parametres', [\App\Http\Controllers\SuperAdmin\ParametreController::class, 'update'])->name('parametres.update');
+        });
+
+    // ===== ESPACE ADMIN =====
+    Route::prefix('admin')
+        ->name('admin.')
+        ->middleware('role:admin')
+        ->group(function () {
+            Route::get('/dashboard', [\App\Http\Controllers\Admin\DashboardController::class, 'index'])->name('dashboard');
+            Route::get('/restaurants', [\App\Http\Controllers\Admin\RestaurantController::class, 'index'])->name('restaurants.index');
+            Route::get('/restaurants/{restaurant}', [\App\Http\Controllers\Admin\RestaurantController::class, 'show'])->name('restaurants.show');
+        });
+
+    // ===== ESPACE GÉRANT =====
+    Route::prefix('gerant')
+        ->name('gerant.')
+        ->middleware('role:gerant')
+        ->group(function () {
+            Route::get('/dashboard', [\App\Http\Controllers\Gerant\DashboardController::class, 'index'])->name('dashboard');
+            
+            // Restaurant
+            Route::get('/restaurant', [\App\Http\Controllers\Gerant\RestaurantController::class, 'edit'])->name('restaurant.edit');
+            Route::put('/restaurant', [\App\Http\Controllers\Gerant\RestaurantController::class, 'update'])->name('restaurant.update');
+            
+            // Horaires
+            Route::resource('horaires', \App\Http\Controllers\Gerant\HoraireController::class);
+            
+            // Tables
+            Route::resource('tables', \App\Http\Controllers\Gerant\TableController::class);
+            
+            // Catégories
+            Route::resource('categories', \App\Http\Controllers\Gerant\CategorieController::class);
+            
+            // Produits
+            Route::resource('produits', \App\Http\Controllers\Gerant\ProduitController::class);
+            Route::post('/produits/{produit}/images', [\App\Http\Controllers\Gerant\ProduitController::class, 'uploadImages'])->name('produits.images');
+            Route::delete('/produits/{produit}/images/{image}', [\App\Http\Controllers\Gerant\ProduitController::class, 'destroyImage'])->name('produits.images.destroy');
+            
+            // Menus du jour
+            Route::resource('menus-du-jour', \App\Http\Controllers\Gerant\MenuDuJourController::class);
+            
+            // Commandes
+            Route::get('/commandes', [\App\Http\Controllers\Gerant\CommandeController::class, 'index'])->name('commandes.index');
+            Route::get('/commandes/{commande}', [\App\Http\Controllers\Gerant\CommandeController::class, 'show'])->name('commandes.show');
+            Route::patch('/commandes/{commande}/statut', [\App\Http\Controllers\Gerant\CommandeController::class, 'changerStatut'])->name('commandes.statut');
+            Route::get('/commandes/encours/kitchen', [\App\Http\Controllers\Gerant\CommandeController::class, 'kitchen'])->name('commandes.kitchen');
+            
+            // Réservations
+            Route::resource('reservations', \App\Http\Controllers\Gerant\ReservationController::class);
+            Route::patch('/reservations/{reservation}/statut', [\App\Http\Controllers\Gerant\ReservationController::class, 'changerStatut'])->name('reservations.statut');
+            Route::get('/reservations/calendrier', [\App\Http\Controllers\Gerant\ReservationController::class, 'calendrier'])->name('reservations.calendrier');
+            
+            // Livraisons
+            Route::get('/livraisons', [\App\Http\Controllers\Gerant\LivraisonController::class, 'index'])->name('livraisons.index');
+            Route::patch('/livraisons/{livraison}/assigner', [\App\Http\Controllers\Gerant\LivraisonController::class, 'assigner'])->name('livraisons.assigner');
+            Route::get('/zones-livraison', [\App\Http\Controllers\Gerant\LivraisonController::class, 'zones'])->name('livraisons.zones');
+            Route::post('/zones-livraison', [\App\Http\Controllers\Gerant\LivraisonController::class, 'storeZone'])->name('livraisons.zones.store');
+            
+            // Avis
+            Route::get('/avis', [\App\Http\Controllers\Gerant\AvisController::class, 'index'])->name('avis.index');
+            Route::post('/avis/{avis}/repondre', [\App\Http\Controllers\Gerant\AvisController::class, 'repondre'])->name('avis.repondre');
+            
+            // Codes promo
+            Route::resource('codes-promo', \App\Http\Controllers\Gerant\CodePromoController::class);
+            
+            // Statistiques
+            Route::get('/statistiques', [\App\Http\Controllers\Gerant\StatistiqueController::class, 'index'])->name('statistiques');
+            Route::get('/statistiques/ventes', [\App\Http\Controllers\Gerant\StatistiqueController::class, 'ventes'])->name('statistiques.ventes');
+            Route::get('/statistiques/plats-populaires', [\App\Http\Controllers\Gerant\StatistiqueController::class, 'platsPopulaires'])->name('statistiques.plats');
+        });
+
+    // ===== ESPACE LIVREUR =====
+    Route::prefix('livreur')
+        ->name('livreur.')
+        ->middleware('role:livreur')
+        ->group(function () {
+            Route::get('/dashboard', [\App\Http\Controllers\Livreur\DashboardController::class, 'index'])->name('dashboard');
+            Route::get('/livraisons', [\App\Http\Controllers\Livreur\LivraisonController::class, 'index'])->name('livraisons.index');
+            Route::get('/livraisons/disponibles', [\App\Http\Controllers\Livreur\LivraisonController::class, 'disponibles'])->name('livraisons.disponibles');
+            Route::post('/livraisons/{livraison}/accepter', [\App\Http\Controllers\Livreur\LivraisonController::class, 'accepter'])->name('livraisons.accepter');
+            Route::patch('/livraisons/{livraison}/statut', [\App\Http\Controllers\Livreur\LivraisonController::class, 'changerStatut'])->name('livraisons.statut');
+            Route::post('/livraisons/{livraison}/localisation', [\App\Http\Controllers\Livreur\LivraisonController::class, 'majLocalisation'])->name('livraisons.localisation');
+            Route::post('/livraisons/{livraison}/preuve', [\App\Http\Controllers\Livreur\LivraisonController::class, 'ajouterPreuve'])->name('livraisons.preuve');
+            Route::get('/planning', [\App\Http\Controllers\Livreur\ProfilController::class, 'planning'])->name('planning');
+            Route::patch('/disponibilite', [\App\Http\Controllers\Livreur\ProfilController::class, 'toggleDisponibilite'])->name('disponibilite');
+            Route::get('/gains', [\App\Http\Controllers\Livreur\ProfilController::class, 'gains'])->name('gains');
+        });
+
+    // ===== ESPACE CLIENT =====
+    Route::prefix('client')
+        ->name('client.')
+        ->middleware('role:client')
+        ->group(function () {
+            Route::get('/dashboard', [\App\Http\Controllers\Client\DashboardController::class, 'index'])->name('dashboard');
+            
+            // Restaurants
+            Route::get('/restaurants', [\App\Http\Controllers\Client\RestaurantController::class, 'index'])->name('restaurants.index');
+            Route::get('/restaurants/{restaurant:slug}', [\App\Http\Controllers\Client\RestaurantController::class, 'show'])->name('restaurants.show');
+            Route::get('/restaurants/{restaurant}/menu', [\App\Http\Controllers\Client\RestaurantController::class, 'menu'])->name('restaurants.menu');
+            
+            // Panier
+            Route::get('/panier', [\App\Http\Controllers\Client\PanierController::class, 'show'])->name('panier.show');
+            Route::post('/panier/ajouter', [\App\Http\Controllers\Client\PanierController::class, 'ajouter'])->name('panier.ajouter');
+            Route::patch('/panier/{ligne}', [\App\Http\Controllers\Client\PanierController::class, 'modifier'])->name('panier.modifier');
+            Route::delete('/panier/{ligne}', [\App\Http\Controllers\Client\PanierController::class, 'supprimer'])->name('panier.supprimer');
+            Route::post('/panier/code-promo', [\App\Http\Controllers\Client\PanierController::class, 'appliquerCodePromo'])->name('panier.code-promo');
+            Route::delete('/panier/code-promo', [\App\Http\Controllers\Client\PanierController::class, 'retirerCodePromo'])->name('panier.code-promo.retirer');
+            
+            // Commandes
+            Route::post('/commandes', [\App\Http\Controllers\Client\CommandeController::class, 'store'])->name('commandes.store');
+            Route::get('/commandes', [\App\Http\Controllers\Client\CommandeController::class, 'index'])->name('commandes.index');
+            Route::get('/commandes/{commande}', [\App\Http\Controllers\Client\CommandeController::class, 'show'])->name('commandes.show');
+            Route::post('/commandes/{commande}/annuler', [\App\Http\Controllers\Client\CommandeController::class, 'annuler'])->name('commandes.annuler');
+            Route::get('/commandes/{commande}/suivi', [\App\Http\Controllers\Client\CommandeController::class, 'suivi'])->name('commandes.suivi');
+            Route::post('/commandes/{commande}/avis', [\App\Http\Controllers\Client\AvisController::class, 'store'])->name('commandes.avis');
+            
+            // Réservations
+            Route::get('/reservations', [\App\Http\Controllers\Client\ReservationController::class, 'index'])->name('reservations.index');
+            Route::get('/reservations/creer/{restaurant}', [\App\Http\Controllers\Client\ReservationController::class, 'create'])->name('reservations.create');
+            Route::post('/reservations', [\App\Http\Controllers\Client\ReservationController::class, 'store'])->name('reservations.store');
+            Route::get('/reservations/{reservation}', [\App\Http\Controllers\Client\ReservationController::class, 'show'])->name('reservations.show');
+            Route::post('/reservations/{reservation}/annuler', [\App\Http\Controllers\Client\ReservationController::class, 'annuler'])->name('reservations.annuler');
+            
+            // Adresses
+            Route::resource('adresses', \App\Http\Controllers\Client\AdresseController::class);
+            Route::patch('/adresses/{adresse}/defaut', [\App\Http\Controllers\Client\AdresseController::class, 'definirDefaut'])->name('adresses.defaut');
+            
+            // Favoris
+            Route::get('/favoris', [\App\Http\Controllers\Client\FavorisController::class, 'index'])->name('favoris.index');
+            Route::post('/favoris/{produit}', [\App\Http\Controllers\Client\FavorisController::class, 'toggle'])->name('favoris.toggle');
+            
+            // Portefeuille & Fidélité
+            Route::get('/portefeuille', [\App\Http\Controllers\Client\PortefeuilleController::class, 'show'])->name('portefeuille.show');
+            Route::post('/portefeuille/recharger', [\App\Http\Controllers\Client\PortefeuilleController::class, 'recharger'])->name('portefeuille.recharger');
+            Route::get('/fidelite', [\App\Http\Controllers\Client\FideliteController::class, 'show'])->name('fidelite.show');
+            Route::get('/fidelite/historique', [\App\Http\Controllers\Client\FideliteController::class, 'historique'])->name('fidelite.historique');
+            
+            // Notifications
+            Route::get('/notifications', [\App\Http\Controllers\Client\NotificationController::class, 'index'])->name('notifications.index');
+            Route::patch('/notifications/{notification}/lire', [\App\Http\Controllers\Client\NotificationController::class, 'marquerLue'])->name('notifications.lire');
+            Route::post('/notifications/tout-lire', [\App\Http\Controllers\Client\NotificationController::class, 'toutMarquerLues'])->name('notifications.tout-lire');
+            
+            // Support
+            Route::resource('tickets', \App\Http\Controllers\Client\TicketController::class);
+            Route::post('/tickets/{ticket}/messages', [\App\Http\Controllers\Client\TicketController::class, 'ajouterMessage'])->name('tickets.messages');
+            
+            // Profil
+            Route::get('/profil', [\App\Http\Controllers\Client\ProfilController::class, 'edit'])->name('profil.edit');
+            Route::put('/profil', [\App\Http\Controllers\Client\ProfilController::class, 'update'])->name('profil.update');
+            Route::get('/profil/preferences', [\App\Http\Controllers\Client\ProfilController::class, 'preferences'])->name('profil.preferences');
+            Route::put('/profil/preferences', [\App\Http\Controllers\Client\ProfilController::class, 'updatePreferences'])->name('profil.preferences.update');
+        });
+});
+```
+
+---
+
+## 📱 4. ROUTES API (`routes/api.php`)
+
+```php
+<?php
+
+use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\V1;
+
+// ===== API PUBLIQUE (sans auth) =====
+Route::prefix('v1')->name('api.v1.')->group(function () {
+    
+    // Restaurants (public)
+    Route::get('/restaurants', [V1\RestaurantController::class, 'index']);
+    Route::get('/restaurants/proches', [V1\RestaurantController::class, 'proches']);
+    Route::get('/restaurants/{restaurant:slug}', [V1\RestaurantController::class, 'show']);
+    Route::get('/restaurants/{restaurant}/menu', [V1\RestaurantController::class, 'menu']);
+    Route::get('/restaurants/{restaurant}/horaires', [V1\RestaurantController::class, 'horaires']);
+    Route::get('/restaurants/{restaurant}/avis', [V1\RestaurantController::class, 'avis']);
+    
+    // Recherche
+    Route::get('/recherche', [V1\RechercheController::class, 'index']);
+    Route::get('/recherche/produits', [V1\RechercheController::class, 'produits']);
+    
+    // Authentification
+    Route::post('/auth/register', [V1\AuthController::class, 'register']);
+    Route::post('/auth/login', [V1\AuthController::class, 'login']);
+    Route::post('/auth/login/phone', [V1\AuthController::class, 'loginPhone']);
+    Route::post('/auth/forgot-password', [V1\AuthController::class, 'forgotPassword']);
+    Route::post('/auth/reset-password', [V1\AuthController::class, 'resetPassword']);
+    Route::post('/auth/verify-email/{id}/{hash}', [V1\AuthController::class, 'verifyEmail'])->name('verification.verify');
+    Route::post('/auth/verify-phone', [V1\AuthController::class, 'verifyPhone']);
+    Route::post('/auth/resend-verification', [V1\AuthController::class, 'resendVerification']);
+    
+    // Social Login
+    Route::post('/auth/social/{provider}', [V1\AuthController::class, 'socialLogin']);
+    
+    // Webhooks (pas d'auth, vérification par signature)
+    Route::post('/webhooks/stripe', [V1\WebhookController::class, 'stripe']);
+    Route::post('/webhooks/mtn', [V1\WebhookController::class, 'mtn']);
+    Route::post('/webhooks/moov', [V1\WebhookController::class, 'moov']);
+    Route::post('/webhooks/paypal', [V1\WebhookController::class, 'paypal']);
+    Route::post('/webhooks/orange-money', [V1\WebhookController::class, 'orangeMoney']);
+    Route::post('/webhooks/wave', [V1\WebhookController::class, 'wave']);
+});
+
+// ===== API AUTHENTIFIÉE (Sanctum) =====
+Route::prefix('v1')->name('api.v1.')->middleware('auth:sanctum')->group(function () {
+    
+    // Profil utilisateur
+    Route::get('/profil', [V1\ProfilController::class, 'show']);
+    Route::put('/profil', [V1\ProfilController::class, 'update']);
+    Route::post('/profil/avatar', [V1\ProfilController::class, 'uploadAvatar']);
+    Route::post('/auth/logout', [V1\AuthController::class, 'logout']);
+    Route::get('/auth/me', [V1\AuthController::class, 'me']);
+    
+    // Adresses
+    Route::apiResource('/adresses', V1\AdresseController::class);
+    Route::patch('/adresses/{adresse}/defaut', [V1\AdresseController::class, 'definirDefaut']);
+    
+    // Panier
+    Route::get('/panier', [V1\PanierController::class, 'show']);
+    Route::post('/panier/ajouter', [V1\PanierController::class, 'ajouter']);
+    Route::patch('/panier/{ligne}', [V1\PanierController::class, 'modifier']);
+    Route::delete('/panier/{ligne}', [V1\PanierController::class, 'supprimer']);
+    Route::delete('/panier', [V1\PanierController::class, 'vider']);
+    Route::post('/panier/code-promo', [V1\PanierController::class, 'appliquerCodePromo']);
+    
+    // Commandes
+    Route::apiResource('/commandes', V1\CommandeController::class)->only(['index', 'show', 'store']);
+    Route::post('/commandes/{commande}/annuler', [V1\CommandeController::class, 'annuler']);
+    Route::get('/commandes/{commande}/suivi', [V1\CommandeController::class, 'suivi']);
+    Route::post('/commandes/{commande}/avis', [V1\AvisController::class, 'store']);
+    Route::post('/commandes/{commande}/recommander', [V1\CommandeController::class, 'recommander']);
+    
+    // Réservations
+    Route::apiResource('/reservations', V1\ReservationController::class);
+    Route::post('/reservations/{reservation}/annuler', [V1\ReservationController::class, 'annuler']);
+    Route::get('/reservations/creneaux/{restaurant}', [V1\ReservationController::class, 'creneauxDisponibles']);
+    
+    // Paiements
+    Route::post('/paiements/intent', [V1\PaiementController::class, 'creerIntent']);
+    Route::post('/paiements/mobile-money', [V1\PaiementController::class, 'initierMobileMoney']);
+    Route::post('/paiements/portefeuille', [V1\PaiementController::class, 'payerAvecPortefeuille']);
+    Route::post('/paiements/carte-cadeau', [V1\PaiementController::class, 'payerAvecCarteCadeau']);
+    Route::get('/paiements/{paiement}/statut', [V1\PaiementController::class, 'statut']);
+    
+    // Portefeuille
+    Route::get('/portefeuille', [V1\PortefeuilleController::class, 'show']);
+    Route::post('/portefeuille/recharger', [V1\PortefeuilleController::class, 'recharger']);
+    Route::get('/portefeuille/transactions', [V1\PortefeuilleController::class, 'transactions']);
+    
+    // Fidélité
+    Route::get('/fidelite', [V1\FideliteController::class, 'show']);
+    Route::get('/fidelite/historique', [V1\FideliteController::class, 'historique']);
+    Route::post('/fidelite/convertir', [V1\FideliteController::class, 'convertirEnReduction']);
+    
+    // Favoris
+    Route::get('/favoris', [V1\FavorisController::class, 'index']);
+    Route::post('/favoris/{produit}', [V1\FavorisController::class, 'toggle']);
+    
+    // Notifications
+    Route::get('/notifications', [V1\NotificationController::class, 'index']);
+    Route::patch('/notifications/{notification}/lire', [V1\NotificationController::class, 'marquerLue']);
+    Route::post('/notifications/tout-lire', [V1\NotificationController::class, 'toutMarquerLues']);
+    Route::post('/notifications/token', [V1\NotificationController::class, 'enregistrerToken']);
+    
+    // Support
+    Route::apiResource('/tickets', V1\TicketController::class);
+    Route::post('/tickets/{ticket}/messages', [V1\TicketController::class, 'ajouterMessage']);
+    
+    // Cartes cadeaux
+    Route::post('/cartes-cadeau', [V1\CarteCadeauController::class, 'acheter']);
+    Route::post('/cartes-cadeau/utiliser', [V1\CarteCadeauController::class, 'utiliser']);
+    Route::get('/cartes-cadeau/mes-cartes', [V1\CarteCadeauController::class, 'mesCartes']);
+    
+    // Parrainage
+    Route::get('/parrainage', [V1\ParrainageController::class, 'show']);
+    Route::post('/parrainage/valider', [V1\ParrainageController::class, 'valider']);
+});
+
+// ===== API LIVREUR (auth:livreur) =====
+Route::prefix('v1/livreur')->name('api.v1.livreur.')
+    ->middleware(['auth:sanctum', 'role:livreur'])
+    ->group(function () {
+        Route::get('/dashboard', [V1\Livreur\DashboardController::class, 'index']);
+        Route::get('/livraisons/disponibles', [V1\Livreur\LivraisonController::class, 'disponibles']);
+        Route::post('/livraisons/{livraison}/accepter', [V1\Livreur\LivraisonController::class, 'accepter']);
+        Route::post('/livraisons/{livraison}/refuser', [V1\Livreur\LivraisonController::class, 'refuser']);
+        Route::patch('/livraisons/{livraison}/statut', [V1\Livreur\LivraisonController::class, 'changerStatut']);
+        Route::post('/livraisons/{livraison}/localisation', [V1\Livreur\LivraisonController::class, 'majLocalisation']);
+        Route::post('/livraisons/{livraison}/preuve', [V1\Livreur\LivraisonController::class, 'ajouterPreuve']);
+        Route::patch('/disponibilite', [V1\Livreur\ProfilController::class, 'toggleDisponibilite']);
+        Route::get('/gains', [V1\Livreur\ProfilController::class, 'gains']);
+        Route::get('/planning', [V1\Livreur\ProfilController::class, 'planning']);
+        Route::post('/evaluations/{livraison}', [V1\Livreur\LivraisonController::class, 'evaluer']);
+    });
+
+// ===== API GÉRANT (auth:gerant) =====
+Route::prefix('v1/gerant')->name('api.v1.gerant.')
+    ->middleware(['auth:sanctum', 'role:gerant'])
+    ->group(function () {
+        Route::get('/dashboard', [V1\Gerant\DashboardController::class, 'index']);
+        Route::get('/commandes/en-cours', [V1\Gerant\CommandeController::class, 'enCours']);
+        Route::patch('/commandes/{commande}/statut', [V1\Gerant\CommandeController::class, 'changerStatut']);
+        Route::get('/reservations/aujourdhui', [V1\Gerant\ReservationController::class, 'aujourdhui']);
+        Route::patch('/reservations/{reservation}/statut', [V1\Gerant\ReservationController::class, 'changerStatut']);
+        Route::get('/statistiques', [V1\Gerant\StatistiqueController::class, 'index']);
+    });
+```
+
+---
+
+## 👮 5. CONTRÔLEURS D'AUTHENTIFICATION
+
+### 5.1 `app/Http/Controllers/Auth/LoginController.php`
+
+```php
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+
+class LoginController extends Controller
+{
+    public function showLoginForm()
+    {
+        return view('auth.login');
+    }
+
+    public function login(Request $request)
+    {
+        $credentials = $request->validate([
+            'email' => ['required', 'email'],
+            'password' => ['required'],
+        ]);
+
+        $remember = $request->boolean('remember');
+
+        if (Auth::attempt($credentials, $remember)) {
+            $request->session()->regenerate();
+
+            $user = Auth::user();
+            $user->update(['derniere_connexion_le' => now()]);
+
+            // Redirection selon le rôle
+            return redirect()->intended($this->redirectionSelonRole($user));
+        }
+
+        return back()->withErrors([
+            'email' => 'Les identifiants fournis ne correspondent pas à nos enregistrements.',
+        ])->onlyInput('email');
+    }
+
+    public function logout(Request $request)
+    {
+        Auth::logout();
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+
+        return redirect('/');
+    }
+
+    private function redirectionSelonRole($user): string
+    {
+        return match($user->role->value) {
+            'superadmin' => route('superadmin.dashboard'),
+            'admin' => route('admin.dashboard'),
+            'gerant' => route('gerant.dashboard'),
+            'livreur' => route('livreur.dashboard'),
+            'client' => route('client.dashboard'),
+            default => '/',
+        };
+    }
+}
+```
+
+### 5.2 `app/Http/Controllers/Api/V1/AuthController.php`
+
+```php
+<?php
+
+namespace App\Http\Controllers\Api\V1;
+
+use App\Http\Controllers\Controller;
+use App\Models\Utilisateur;
+use App\Models\ProfilClient;
+use App\Models\Portefeuille;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules\Password;
+use Illuminate\Validation\ValidationException;
+
+class AuthController extends Controller
+{
+    /**
+     * Inscription client
+     */
+    public function register(Request $request)
+    {
+        $donnees = $request->validate([
+            'prenom' => ['required', 'string', 'max:100'],
+            'nom' => ['required', 'string', 'max:100'],
+            'email' => ['required', 'email', 'unique:utilisateurs,email'],
+            'telephone' => ['nullable', 'string', 'max:20'],
+            'mot_de_passe' => ['required', 'confirmed', Password::min(8)->mixedCase()->numbers()],
+            'code_parrainage' => ['nullable', 'string', 'exists:profils_client,code_parrainage'],
+        ]);
+
+        $utilisateur = Utilisateur::create([
+            'prenom' => $donnees['prenom'],
+            'nom' => $donnees['nom'],
+            'email' => $donnees['email'],
+            'telephone' => $donnees['telephone'] ?? null,
+            'mot_de_passe' => Hash::make($donnees['mot_de_passe']),
+            'role' => 'client',
+        ]);
+
+        // Créer le profil client
+        $profil = ProfilClient::create([
+            'utilisateur_id' => $utilisateur->id,
+            'code_parrainage' => $donnees['code_parrainage'] ?? null,
+        ]);
+
+        // Créer le portefeuille
+        Portefeuille::create([
+            'client_id' => $profil->id,
+            'solde' => 0,
+            'devise' => 'XOF',
+        ]);
+
+        // Gérer le parrainage
+        if (!empty($donnees['code_parrainage'])) {
+            $this->gererParrainage($profil, $donnees['code_parrainage']);
+        }
+
+        // Créer le token
+        $token = $utilisateur->createToken('api-token')->plainTextToken;
+
+        return response()->json([
+            'message' => 'Inscription réussie',
+            'utilisateur' => $utilisateur->load('profilClient'),
+            'token' => $token,
+        ], 201);
+    }
+
+    /**
+     * Connexion email/mot de passe
+     */
+    public function login(Request $request)
+    {
+        $request->validate([
+            'email' => ['required', 'email'],
+            'mot_de_passe' => ['required'],
+            'device_name' => ['nullable', 'string'],
+        ]);
+
+        $utilisateur = Utilisateur::where('email', $request->email)->first();
+
+        if (!$utilisateur || !Hash::check($request->mot_de_passe, $utilisateur->mot_de_passe)) {
+            throw ValidationException::withMessages([
+                'email' => ['Les identifiants fournis sont incorrects.'],
+            ]);
+        }
+
+        if (!$utilisateur->estActif()) {
+            throw ValidationException::withMessages([
+                'email' => ['Votre compte est suspendu.'],
+            ]);
+        }
+
+        $utilisateur->update(['derniere_connexion_le' => now()]);
+
+        $token = $utilisateur->createToken(
+            $request->device_name ?? 'api-token'
+        )->plainTextToken;
+
+        return response()->json([
+            'token' => $token,
+            'utilisateur' => $utilisateur->load('profilClient'),
+        ]);
+    }
+
+    /**
+     * Connexion par téléphone (OTP)
+     */
+    public function loginPhone(Request $request)
+    {
+        $request->validate([
+            'telephone' => ['required', 'string'],
+            'otp' => ['nullable', 'string'],
+        ]);
+
+        // Si pas d'OTP, on envoie un code
+        if (!$request->otp) {
+            $otp = rand(100000, 999999);
+            cache()->put('otp_phone_' . $request->telephone, $otp, now()->addMinutes(10));
+            
+            // TODO: Envoyer SMS via Twilio/OVH
+            return response()->json([
+                'message' => 'Code OTP envoyé',
+                'expires_in' => 600,
+            ]);
+        }
+
+        // Vérifier l'OTP
+        $otpEnCache = cache()->get('otp_phone_' . $request->telephone);
+        
+        if ($otpEnCache != $request->otp) {
+            throw ValidationException::withMessages([
+                'otp' => ['Code OTP invalide ou expiré.'],
+            ]);
+        }
+
+        $utilisateur = Utilisateur::where('telephone', $request->telephone)->first();
+
+        if (!$utilisateur) {
+            // Inscription automatique
+            return $this->registerPhone($request->telephone);
+        }
+
+        cache()->forget('otp_phone_' . $request->telephone);
+        $token = $utilisateur->createToken('phone-token')->plainTextToken;
+
+        return response()->json([
+            'token' => $token,
+            'utilisateur' => $utilisateur->load('profilClient'),
+        ]);
+    }
+
+    /**
+     * Déconnexion
+     */
+    public function logout(Request $request)
+    {
+        $request->user()->currentAccessToken()->delete();
+
+        return response()->json(['message' => 'Déconnexion réussie']);
+    }
+
+    /**
+     * Utilisateur courant
+     */
+    public function me(Request $request)
+    {
+        $utilisateur = $request->user()->load([
+            'profilClient.adresseParDefaut',
+            'profilClient.portefeuille',
+        ]);
+
+        return response()->json(['utilisateur' => $utilisateur]);
+    }
+
+    /**
+     * Mot de passe oublié
+     */
+    public function forgotPassword(Request $request)
+    {
+        $request->validate(['email' => 'required|email']);
+
+        $status = \Illuminate\Support\Facades\Password::sendResetLink(
+            $request->only('email')
+        );
+
+        if ($status === \Illuminate\Support\Facades\Password::RESET_LINK_SENT) {
+            return response()->json(['message' => 'Lien de réinitialisation envoyé']);
+        }
+
+        throw ValidationException::withMessages([
+            'email' => [__($status)],
+        ]);
+    }
+
+    /**
+     * Réinitialisation du mot de passe
+     */
+    public function resetPassword(Request $request)
+    {
+        $request->validate([
+            'token' => 'required',
+            'email' => 'required|email',
+            'mot_de_passe' => ['required', 'confirmed', Password::min(8)],
+        ]);
+
+        $status = \Illuminate\Support\Facades\Password::reset(
+            $request->only('email', 'mot_de_passe', 'mot_de_passe_confirmation', 'token'),
+            function ($user, $password) {
+                $user->forceFill([
+                    'mot_de_passe' => Hash::make($password),
+                ])->save();
+
+                $user->tokens()->delete(); // Révoquer tous les tokens
+            }
+        );
+
+        if ($status === \Illuminate\Support\Facades\Password::PASSWORD_RESET) {
+            return response()->json(['message' => 'Mot de passe réinitialisé']);
+        }
+
+        throw ValidationException::withMessages([
+            'email' => [__($status)],
+        ]);
+    }
+
+    /**
+     * Login social (Google, Facebook, Apple)
+     */
+    public function socialLogin(Request $request, string $provider)
+    {
+        $request->validate([
+            'access_token' => 'required|string',
+        ]);
+
+        // TODO: Implémenter avec Laravel Socialite
+        // $socialUser = \Laravel\Socialite\Facades\Socialite::driver($provider)->stateless()->userFromToken($request->access_token);
+
+        return response()->json(['message' => 'Login social - à implémenter'], 501);
+    }
+
+    // ===== MÉTHODES PRIVÉES =====
+
+    private function registerPhone(string $telephone)
+    {
+        $utilisateur = Utilisateur::create([
+            'prenom' => 'Client',
+            'nom' => 'Mobile',
+            'email' => $telephone . '@mobile.local',
+            'telephone' => $telephone,
+            'telephone_verifie_le' => now(),
+            'mot_de_passe' => Hash::make(\Illuminate\Support\Str::random(32)),
+            'role' => 'client',
+        ]);
+
+        $profil = ProfilClient::create(['utilisateur_id' => $utilisateur->id]);
+        Portefeuille::create(['client_id' => $profil->id, 'solde' => 0, 'devise' => 'XOF']);
+
+        $token = $utilisateur->createToken('phone-token')->plainTextToken;
+
+        return response()->json([
+            'token' => $token,
+            'utilisateur' => $utilisateur->load('profilClient'),
+            'nouveau_compte' => true,
+        ], 201);
+    }
+
+    private function gererParrainage(ProfilClient $filleul, string $codeParrainage): void
+    {
+        $parrain = ProfilClient::where('code_parrainage', $codeParrainage)->first();
+
+        if (!$parrain || $parrain->id === $filleul->id) {
+            return;
+        }
+
+        \App\Models\Parrainage::create([
+            'parrain_id' => $parrain->id,
+            'filleul_id' => $filleul->id,
+            'code_utilise' => $codeParrainage,
+            'bonus_parrain' => 500,
+            'bonus_filleul' => 500,
+            'statut' => 'en_attente',
+        ]);
+
+        $filleul->update(['parraine_par_id' => $parrain->id]);
+    }
+}
+```
+
+---
+
+## 🍽️ 6. CONTRÔLEURS API PRINCIPAUX
+
+### 6.1 `app/Http/Controllers/Api/V1/RestaurantController.php`
+
+```php
+<?php
+
+namespace App\Http\Controllers\Api\V1;
+
+use App\Http\Controllers\Controller;
+use App\Models\Restaurant;
+use App\Http\Resources\V1\RestaurantResource;
+use App\Http\Resources\V1\RestaurantCollection;
+use Illuminate\Http\Request;
+
+class RestaurantController extends Controller
+{
+    public function index(Request $request)
+    {
+        $query = Restaurant::query()
+            ->actifs()
+            ->with(['images', 'services']);
+
+        // Filtres
+        if ($request->filled('ville')) {
+            $query->where('ville', $request->ville);
+        }
+
+        if ($request->boolean('en_avant')) {
+            $query->enAvant();
+        }
+
+        if ($request->boolean('livraison')) {
+            $query->avecLivraison();
+        }
+
+        if ($request->boolean('ouverts')) {
+            $query->ouvertsMaintenant();
+        }
+
+        if ($request->filled('note_min')) {
+            $query->where('note', '>=', $request->note_min);
+        }
+
+        // Tri
+        $sortBy = $request->input('sort', 'note');
+        $sortOrder = $request->input('order', 'desc');
+        
+        $query->orderBy($sortBy, $sortOrder);
+
+        $restaurants = $query->paginate($request->input('per_page', 20));
+
+        return new RestaurantCollection($restaurants);
+    }
+
+    public function proches(Request $request)
+    {
+        $request->validate([
+            'latitude' => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
+            'rayon' => 'nullable|integer|max:50',
+        ]);
+
+        $rayon = $request->input('rayon', 10);
+
+        $restaurants = Restaurant::actifs()
+            ->prochesDe(
+                $request->latitude,
+                $request->longitude,
+                $rayon
+            )
+            ->with(['images'])
+            ->take(20)
+            ->get();
+
+        return RestaurantResource::collection($restaurants);
+    }
+
+    public function show(Restaurant $restaurant)
+    {
+        $restaurant->load([
+            'images',
+            'services',
+            'categories.sousCategories',
+            'horaires',
+        ]);
+
+        return new RestaurantResource($restaurant);
+    }
+
+    public function menu(Restaurant $restaurant)
+    {
+        $categories = $restaurant->categories()
+            ->actives()
+            ->with([
+                'sousCategories' => fn($q) => $q->orderBy('ordre_tri'),
+                'produits' => fn($q) => $q->wherePivot('restaurant_id', $restaurant->id)
+                    ->wherePivot('est_disponible', true)
+                    ->disponibles()
+                    ->with(['images', 'variantes', 'supplements', 'allergenes', 'tags'])
+                    ->orderBy('ordre_tri'),
+            ])
+            ->orderBy('ordre_tri')
+            ->get();
+
+        return response()->json([
+            'restaurant' => new RestaurantResource($restaurant),
+            'categories' => $categories,
+        ]);
+    }
+
+    public function horaires(Restaurant $restaurant)
+    {
+        return response()->json([
+            'horaires' => $restaurant->horaires,
+            'fermetures_speciales' => $restaurant->fermeturesSpeciales,
+            'est_ouvert' => $restaurant->estOuvertMaintenant(),
+        ]);
+    }
+
+    public function avis(Restaurant $restaurant, Request $request)
+    {
+        $avis = $restaurant->avis()
+            ->visibles()
+            ->with(['client.utilisateur', 'photos'])
+            ->latest()
+            ->paginate($request->input('per_page', 20));
+
+        return response()->json([
+            'note_moyenne' => $restaurant->note,
+            'total_avis' => $restaurant->total_avis,
+            'avis' => $avis,
+        ]);
+    }
+}
+```
+
+### 6.2 `app/Http/Controllers/Api/V1/CommandeController.php`
+
+```php
+<?php
+
+namespace App\Http\Controllers\Api\V1;
+
+use App\Http\Controllers\Controller;
+use App\Enums\StatutCommande;
+use App\Enums\TypeCommande;
+use App\Models\Commande;
+use App\Models\Panier;
+use App\Services\OrderService;
+use Illuminate\Http\Request;
+
+class CommandeController extends Controller
+{
+    public function __construct(
+        private OrderService $orderService
+    ) {}
+
+    public function index(Request $request)
+    {
+        $commandes = $request->user()->profilClient
+            ->commandes()
+            ->with(['restaurant', 'lignes.produit', 'livraison'])
+            ->latest()
+            ->paginate($request->input('per_page', 20));
+
+        return response()->json(['commandes' => $commandes]);
+    }
+
+    public function show(Commande $commande, Request $request)
+    {
+        $this->autoriserAcces($commande, $request->user());
+
+        $commande->load([
+            'restaurant',
+            'lignes.produit.images',
+            'lignes.variante',
+            'lignes.options',
+            'adresseLivraison',
+            'livraison.suivis',
+            'livraison.livreur.utilisateur',
+            'paiement',
+            'codePromo',
+        ]);
+
+        return response()->json(['commande' => $commande]);
+    }
+
+    public function store(Request $request)
+    {
+        $donnees = $request->validate([
+            'restaurant_id' => 'required|exists:restaurants,id',
+            'type_commande' => 'required|in:livraison,retrait,sur_place',
+            'adresse_livraison_id' => 'required_if:type_commande,livraison|exists:adresses,id',
+            'table_id' => 'required_if:type_commande,sur_place|exists:tables_restaurant,id',
+            'code_promo' => 'nullable|string',
+            'notes_client' => 'nullable|string|max:500',
+            'methode_paiement' => 'required|string',
+            'telephone_mobile_money' => 'nullable|string',
+            'utiliser_points_fidelite' => 'nullable|boolean',
+            'utiliser_portefeuille' => 'nullable|boolean',
+        ]);
+
+        $client = $request->user()->profilClient;
+        $panier = Panier::where('client_id', $client->id)
+            ->where('restaurant_id', $donnees['restaurant_id'])
+            ->with('lignes')
+            ->first();
+
+        if (!$panier || $panier->lignes->isEmpty()) {
+            return response()->json(['message' => 'Votre panier est vide'], 422);
+        }
+
+        try {
+            $commande = $this->orderService->creerDepuisPanier($client, $panier, $donnees);
+
+            return response()->json([
+                'message' => 'Commande créée avec succès',
+                'commande' => $commande->load(['paiement', 'livraison']),
+            ], 201);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Erreur lors de la création de la commande',
+                'erreur' => $e->getMessage(),
+            ], 422);
+        }
+    }
+
+    public function annuler(Commande $commande, Request $request)
+    {
+        $this->autoriserAcces($commande, $request->user());
+
+        if (!$commande->estAnnulable()) {
+            return response()->json([
+                'message' => 'Cette commande ne peut plus être annulée',
+            ], 422);
+        }
+
+        $this->orderService->annuler($commande, 'Annulation par le client');
+
+        return response()->json(['message' => 'Commande annulée']);
+    }
+
+    public function suivi(Commande $commande, Request $request)
+    {
+        $this->autoriserAcces($commande, $request->user());
+
+        $commande->load([
+            'livraison.suivis' => fn($q) => $q->latest()->take(50),
+            'livraison.livreur.utilisateur',
+        ]);
+
+        return response()->json([
+            'statut' => $commande->statut,
+            'statut_label' => $commande->statut->label(),
+            'livraison' => $commande->livraison,
+            'estimation' => $commande->temps_preparation_estime,
+        ]);
+    }
+
+    public function recommander(Commande $commande, Request $request)
+    {
+        $this->autoriserAcces($commande, $request->user());
+
+        $client = $request->user()->profilClient;
+
+        // Créer un nouveau panier avec les mêmes produits
+        $panier = Panier::create([
+            'client_id' => $client->id,
+            'restaurant_id' => $commande->restaurant_id,
+            'session_id' => $request->session()?->getId(),
+        ]);
+
+        foreach ($commande->lignes as $ligne) {
+            $panier->lignes()->create([
+                'produit_id' => $ligne->produit_id,
+                'variante_id' => $ligne->variante_id,
+                'quantite' => $ligne->quantite,
+                'prix_unitaire' => $ligne->produit->prix_actuel,
+                'options' => $ligne->options->map(fn($o) => [
+                    'id' => $o->supplement_id,
+                    'nom' => $o->nom_supplement,
+                    'prix' => $o->prix,
+                ])->toArray(),
+                'notes' => $ligne->notes,
+            ]);
+        }
+
+        $panier->recalculerTotal();
+
+        return response()->json([
+            'message' => 'Produits ajoutés au panier',
+            'panier_id' => $panier->id,
+        ]);
+    }
+
+    private function autoriserAcces(Commande $commande, $user): void
+    {
+        if ($commande->client_id !== $user->profilClient->id) {
+            abort(403, 'Vous n\'avez pas accès à cette commande');
+        }
+    }
+}
+```
+
+---
+
+## 🍳 7. CONTRÔLEURS GÉRANT
+
+### 7.1 `app/Http/Controllers/Gerant/CommandeController.php`
+
+```php
+<?php
+
+namespace App\Http\Controllers\Gerant;
+
+use App\Http\Controllers\Controller;
+use App\Enums\StatutCommande;
+use App\Models\Commande;
+use App\Services\OrderService;
+use Illuminate\Http\Request;
+
+class CommandeController extends Controller
+{
+    public function __construct(
+        private OrderService $orderService
+    ) {}
+
+    public function index(Request $request)
+    {
+        $restaurantId = $request->user()->profilGerant->restaurant_id;
+
+        $commandes = Commande::duRestaurant($restaurantId)
+            ->with(['client.utilisateur', 'lignes.produit', 'livraison.livreur.utilisateur'])
+            ->latest()
+            ->paginate(20);
+
+        return view('gerant.commandes.index', compact('commandes'));
+    }
+
+    public function show(Commande $commande)
+    {
+        $this->verifierAcces($commande);
+
+        $commande->load([
+            'client.utilisateur',
+            'restaurant',
+            'lignes.produit.images',
+            'lignes.variante',
+            'lignes.options',
+            'adresseLivraison',
+            'livraison.livreur.utilisateur',
+            'paiement',
+            'historiqueStatuts.modifiePar',
+        ]);
+
+        return view('gerant.commandes.show', compact('commande'));
+    }
+
+    public function changerStatut(Commande $commande, Request $request)
+    {
+        $this->verifierAcces($commande);
+
+        $request->validate([
+            'statut' => 'required|in:confirmee,en_preparation,prete,en_livraison,livree,terminee',
+            'commentaire' => 'nullable|string|max:500',
+        ]);
+
+        $nouveauStatut = StatutCommande::from($request->statut);
+
+        // Vérifications métier
+        $this->orderService->validerTransitionStatut($commande, $nouveauStatut);
+
+        $commande->changerStatut(
+            $nouveauStatut,
+            $request->commentaire,
+            $request->user()
+        );
+
+        // Si statut "prete" et livraison → déclencher assignation livreur
+        if ($nouveauStatut === StatutCommande::PRETE && $commande->type_commande->value === 'livraison') {
+            $this->orderService->declencherAssignationLivreur($commande);
+        }
+
+        if ($request->wantsJson()) {
+            return response()->json(['message' => 'Statut mis à jour']);
+        }
+
+        return back()->with('success', 'Statut de la commande mis à jour');
+    }
+
+    public function kitchen(Request $request)
+    {
+        $restaurantId = $request->user()->profilGerant->restaurant_id;
+
+        $commandes = Commande::duRestaurant($restaurantId)
+            ->whereIn('statut', [
+                StatutCommande::CONFIRMEE,
+                StatutCommande::EN_PREPARATION,
+            ])
+            ->with(['lignes.produit', 'lignes.options', 'table'])
+            ->oldest('cree_le')
+            ->get();
+
+        return view('gerant.commandes.kitchen', compact('commandes'));
+    }
+
+    private function verifierAcces(Commande $commande): void
+    {
+        $restaurantId = auth()->user()->profilGerant->restaurant_id;
+        if ($commande->restaurant_id !== $restaurantId) {
+            abort(403);
+        }
+    }
+}
+```
+
+### 7.2 `app/Http/Controllers/Gerant/ProduitController.php`
+
+```php
+<?php
+
+namespace App\Http\Controllers\Gerant;
+
+use App\Http\Controllers\Controller;
+use App\Models\Produit;
+use App\Models\Categorie;
+use App\Services\ImageService;
+use Illuminate\Http\Request;
+
+class ProduitController extends Controller
+{
+    public function __construct(
+        private ImageService $imageService
+    ) {}
+
+    public function index(Request $request)
+    {
+        $restaurantId = $request->user()->profilGerant->restaurant_id;
+
+        $produits = Produit::dansRestaurant($restaurantId)
+            ->with(['categorie', 'images', 'restaurants'])
+            ->orderBy('ordre_tri')
+            ->paginate(20);
+
+        return view('gerant.produits.index', compact('produits'));
+    }
+
+    public function create(Request $request)
+    {
+        $restaurantId = $request->user()->profilGerant->restaurant_id;
+        $categories = Categorie::where('restaurant_id', $restaurantId)->actives()->get();
+
+        return view('gerant.produits.create', compact('categories'));
+    }
+
+    public function store(Request $request)
+    {
+        $restaurantId = $request->user()->profilGerant->restaurant_id;
+
+        $donnees = $request->validate([
+            'categorie_id' => 'required|exists:categories,id',
+            'sous_categorie_id' => 'nullable|exists:sous_categories,id',
+            'nom_fr' => 'required|string|max:255',
+            'nom_en' => 'nullable|string|max:255',
+            'description_fr' => 'nullable|string',
+            'description_en' => 'nullable|string',
+            'prix_base' => 'required|numeric|min:0',
+            'prix_promo' => 'nullable|numeric|min:0',
+            'taux_tva' => 'nullable|numeric|min:0|max:100',
+            'calories' => 'nullable|integer|min:0',
+            'temps_preparation' => 'nullable|integer|min:0',
+            'est_vegetarien' => 'boolean',
+            'est_vegan' => 'boolean',
+            'est_sans_gluten' => 'boolean',
+            'est_halal' => 'boolean',
+            'est_epice' => 'boolean',
+            'est_en_avant' => 'boolean',
+            'est_nouveau' => 'boolean',
+            'quantite_stock' => 'nullable|integer|min:0',
+            'allergenes' => 'array',
+            'allergenes.*' => 'exists:allergenes,id',
+            'tags' => 'nullable|string',
+        ]);
+
+        // Construire les champs multi-langue
+        $nom = ['fr' => $donnees['nom_fr']];
+        if (!empty($donnees['nom_en'])) $nom['en'] = $donnees['nom_en'];
+
+        $description = [];
+        if (!empty($donnees['description_fr'])) $description['fr'] = $donnees['description_fr'];
+        if (!empty($donnees['description_en'])) $description['en'] = $donnees['description_en'];
+
+        $produit = Produit::create([
+            'categorie_id' => $donnees['categorie_id'],
+            'sous_categorie_id' => $donnees['sous_categorie_id'] ?? null,
+            'nom' => $nom,
+            'description' => $description ?: null,
+            'prix_base' => $donnees['prix_base'],
+            'prix_promo' => $donnees['prix_promo'] ?? null,
+            'taux_tva' => $donnees['taux_tva'] ?? 18,
+            'calories' => $donnees['calories'] ?? null,
+            'temps_preparation' => $donnees['temps_preparation'] ?? null,
+            'est_vegetarien' => $donnees['est_vegetarien'] ?? false,
+            'est_vegan' => $donnees['est_vegan'] ?? false,
+            'est_sans_gluten' => $donnees['est_sans_gluten'] ?? false,
+            'est_halal' => $donnees['est_halal'] ?? false,
+            'est_epice' => $donnees['est_epice'] ?? false,
+            'est_en_avant' => $donnees['est_en_avant'] ?? false,
+            'est_nouveau' => $donnees['est_nouveau'] ?? false,
+            'quantite_stock' => $donnees['quantite_stock'] ?? null,
+        ]);
+
+        // Associer au restaurant avec prix spécifique
+        $produit->restaurants()->attach($restaurantId, [
+            'prix' => $donnees['prix_base'],
+            'est_disponible' => true,
+        ]);
+
+        // Allergènes
+        if (!empty($donnees['allergenes'])) {
+            $produit->allergenes()->attach($donnees['allergenes']);
+        }
+
+        // Tags
+        if (!empty($donnees['tags'])) {
+            $tags = array_map('trim', explode(',', $donnees['tags']));
+            foreach ($tags as $tag) {
+                $produit->tags()->create(['tag' => $tag]);
+            }
+        }
+
+        return redirect()
+            ->route('gerant.produits.show', $produit)
+            ->with('success', 'Produit créé avec succès');
+    }
+
+    public function show(Produit $produit)
+    {
+        $this->verifierAcces($produit);
+
+        $produit->load(['categorie', 'sousCategorie', 'images', 'variantes', 'supplements', 'allergenes', 'tags']);
+
+        return view('gerant.produits.show', compact('produit'));
+    }
+
+    public function edit(Produit $produit)
+    {
+        $this->verifierAcces($produit);
+
+        $restaurantId = auth()->user()->profilGerant->restaurant_id;
+        $categories = Categorie::where('restaurant_id', $restaurantId)->actives()->get();
+
+        $produit->load(['variantes', 'supplements', 'allergenes', 'tags']);
+
+        return view('gerant.produits.edit', compact('produit', 'categories'));
+    }
+
+    public function update(Request $request, Produit $produit)
+    {
+        $this->verifierAcces($produit);
+
+        $donnees = $request->validate([
+            'categorie_id' => 'required|exists:categories,id',
+            'nom_fr' => 'required|string|max:255',
+            'nom_en' => 'nullable|string|max:255',
+            'description_fr' => 'nullable|string',
+            'prix_base' => 'required|numeric|min:0',
+            'prix_promo' => 'nullable|numeric|min:0',
+            'est_disponible' => 'boolean',
+        ]);
+
+        $nom = ['fr' => $donnees['nom_fr']];
+        if (!empty($donnees['nom_en'])) $nom['en'] = $donnees['nom_en'];
+
+        $description = [];
+        if (!empty($donnees['description_fr'])) $description['fr'] = $donnees['description_fr'];
+
+        $produit->update([
+            'categorie_id' => $donnees['categorie_id'],
+            'nom' => $nom,
+            'description' => $description ?: null,
+            'prix_base' => $donnees['prix_base'],
+            'prix_promo' => $donnees['prix_promo'] ?? null,
+            'est_disponible' => $donnees['est_disponible'] ?? true,
+        ]);
+
+        // Mettre à jour le prix dans la pivot
+        $restaurantId = auth()->user()->profilGerant->restaurant_id;
+        $produit->restaurants()->updateExistingPivot($restaurantId, [
+            'prix' => $donnees['prix_base'],
+        ]);
+
+        return redirect()
+            ->route('gerant.produits.show', $produit)
+            ->with('success', 'Produit mis à jour');
+    }
+
+    public function destroy(Produit $produit)
+    {
+        $this->verifierAcces($produit);
+        $produit->delete();
+
+        return redirect()
+            ->route('gerant.produits.index')
+            ->with('success', 'Produit supprimé');
+    }
+
+    public function uploadImages(Request $request, Produit $produit)
+    {
+        $this->verifierAcces($produit);
+
+        $request->validate([
+            'images' => 'required|array|max:10',
+            'images.*' => 'image|max:5120', // 5MB
+        ]);
+
+        foreach ($request->file('images') as $image) {
+            $chemin = $this->imageService->uploader($image, 'produits');
+            
+            $produit->images()->create([
+                'chemin_image' => $chemin,
+                'est_principale' => $produit->images()->count() === 0,
+            ]);
+        }
+
+        return back()->with('success', 'Images uploadées');
+    }
+
+    private function verifierAcces(Produit $produit): void
+    {
+        $restaurantId = auth()->user()->profilGerant->restaurant_id;
+        if (!$produit->restaurants()->where('restaurants.id', $restaurantId)->exists()) {
+            abort(403);
+        }
+    }
+}
+```
+
+---
+
+## 🚚 8. CONTRÔLEURS LIVREUR
+
+### 8.1 `app/Http/Controllers/Livreur/LivraisonController.php`
+
+```php
+<?php
+
+namespace App\Http\Controllers\Livreur;
+
+use App\Http\Controllers\Controller;
+use App\Models\Livraison;
+use App\Services\DeliveryService;
+use Illuminate\Http\Request;
+
+class LivraisonController extends Controller
+{
+    public function __construct(
+        private DeliveryService $deliveryService
+    ) {}
+
+    public function index(Request $request)
+    {
+        $livreur = $request->user()->profilLivreur;
+
+        $livraisons = Livraison::duLivreur($livreur->id)
+            ->with(['commande.client.utilisateur', 'commande.restaurant', 'commande.adresseLivraison'])
+            ->enCours()
+            ->latest()
+            ->paginate(20);
+
+        return view('livreur.livraisons.index', compact('livraisons'));
+    }
+
+    public function disponibles(Request $request)
+    {
+        $livreur = $request->user()->profilLivreur;
+
+        $livraisons = Livraison::enAttente()
+            ->with(['commande.restaurant', 'commande.adresseLivraison'])
+            ->whereHas('commande.restaurant', function($q) use ($livreur) {
+                // Filtrer par zone du livreur
+                if ($livreur->zone_geojson) {
+                    $q->whereRaw("ST_Contains(ST_GeomFromGeoJSON(?), ST_Point(longitude, latitude))", [
+                        json_encode($livreur->zone_geojson)
+                    ]);
+                }
+            })
+            ->get();
+
+        return view('livreur.livraisons.disponibles', compact('livraisons'));
+    }
+
+    public function accepter(Livraison $livraison, Request $request)
+    {
+        $livreur = $request->user()->profilLivreur;
+
+        if ($livraison->livreur_id) {
+            return back()->with('error', 'Cette livraison a déjà été acceptée');
+        }
+
+        $this->deliveryService->assignerLivreur($livraison, $livreur);
+
+        return redirect()
+            ->route('livreur.livraisons.show', $livraison)
+            ->with('success', 'Livraison acceptée');
+    }
+
+    public function changerStatut(Livraison $livraison, Request $request)
+    {
+        $livreur = $request->user()->profilLivreur;
+
+        if ($livraison->livreur_id !== $livreur->id) {
+            abort(403, 'Vous n\'êtes pas assigné à cette livraison');
+        }
+
+        $request->validate([
+            'statut' => 'required|in:en_route_restaurant,recuperee,en_livraison,livree',
+        ]);
+
+        $this->deliveryService->changerStatut($livraison, $request->statut);
+
+        return back()->with('success', 'Statut mis à jour');
+    }
+
+    public function majLocalisation(Livraison $livraison, Request $request)
+    {
+        $livreur = $request->user()->profilLivreur;
+
+        $request->validate([
+            'latitude' => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
+            'vitesse' => 'nullable|numeric',
+            'direction' => 'nullable|numeric',
+        ]);
+
+        // Mettre à jour la position du livreur
+        $livreur->mettreAJourLocalisation($request->latitude, $request->longitude);
+
+        // Enregistrer le suivi
+        $livraison->suivis()->create([
+            'livreur_id' => $livreur->id,
+            'latitude' => $request->latitude,
+            'longitude' => $request->longitude,
+            'vitesse' => $request->vitesse,
+            'direction' => $request->direction,
+        ]);
+
+        // Broadcast en temps réel via WebSocket
+        broadcast(new \App\Events\LivraisonPositionUpdated($livraison->id, [
+            'lat' => $request->latitude,
+            'lng' => $request->longitude,
+        ]))->toOthers();
+
+        return response()->json(['message' => 'Position mise à jour']);
+    }
+
+    public function ajouterPreuve(Livraison $livraison, Request $request)
+    {
+        $livreur = $request->user()->profilLivreur;
+
+        $request->validate([
+            'type_preuve' => 'required|in:photo,signature,code,gps',
+            'photo' => 'required_if:type_preuve,photo|image|max:5120',
+            'signature' => 'required_if:type_preuve,signature|string',
+            'code' => 'required_if:type_preuve,code|string',
+            'nom_destinataire' => 'nullable|string|max:255',
+        ]);
+
+        $donnees = [
+            'type_preuve' => $request->type_preuve,
+            'nom_destinataire' => $request->nom_destinataire,
+            'latitude' => $livreur->latitude_courante,
+            'longitude' => $livreur->longitude_courante,
+        ];
+
+        if ($request->type_preuve === 'photo') {
+            $donnees['chemin_fichier'] = $this->uploadPreuve($request->file('photo'));
+        } elseif ($request->type_preuve === 'signature') {
+            $donnees['signature_base64'] = $request->signature;
+        } elseif ($request->type_preuve === 'code') {
+            $donnees['code_confirmation'] = $request->code;
+        }
+
+        $preuve = $livraison->preuve()->create($donnees);
+
+        // Marquer la livraison comme livrée
+        $this->deliveryService->marquerLivree($livraison, $preuve);
+
+        return back()->with('success', 'Livraison terminée');
+    }
+
+    private function uploadPreuve($file): string
+    {
+        return $file->store('preuves-livraison', 'public');
+    }
+}
+```
+
+---
+
+## 🛒 9. CONTRÔLEURS CLIENT
+
+### 9.1 `app/Http/Controllers/Client/PanierController.php`
+
+```php
+<?php
+
+namespace App\Http\Controllers\Client;
+
+use App\Http\Controllers\Controller;
+use App\Models\Panier;
+use App\Models\Produit;
+use App\Models\CodePromo;
+use Illuminate\Http\Request;
+
+class PanierController extends Controller
+{
+    public function show(Request $request)
+    {
+        $client = $request->user()->profilClient;
+        $panier = $this->recupererOuCreerPanier($client, $request);
+
+        $panier->load([
+            'restaurant',
+            'lignes.produit.images',
+            'lignes.variante',
+            'codePromo',
+        ]);
+
+        return view('client.panier.show', compact('panier'));
+    }
+
+    public function ajouter(Request $request)
+    {
+        $donnees = $request->validate([
+            'produit_id' => 'required|exists:produits,id',
+            'restaurant_id' => 'required|exists:restaurants,id',
+            'variante_id' => 'nullable|exists:variantes_produit,id',
+            'quantite' => 'required|integer|min:1|max:20',
+            'options' => 'nullable|array',
+            'options.*.supplement_id' => 'required_with:options|exists:supplements_produit,id',
+            'notes' => 'nullable|string|max:255',
+        ]);
+
+        $client = $request->user()->profilClient;
+        $produit = Produit::with(['variantes', 'supplements'])->findOrFail($donnees['produit_id']);
+
+        // Vérifier disponibilité
+        if (!$produit->est_disponible || !$produit->estEnStock()) {
+            return back()->with('error', 'Ce produit n\'est pas disponible');
+        }
+
+        // Vérifier que le produit est dans le bon restaurant
+        if (!$produit->restaurants()->where('restaurants.id', $donnees['restaurant_id'])->exists()) {
+            return back()->with('error', 'Produit non disponible dans ce restaurant');
+        }
+
+        $panier = $this->recupererOuCreerPanier($client, $request, $donnees['restaurant_id']);
+
+        // Vérifier si le produit existe déjà dans le panier (mêmes options)
+        $ligneExistante = $panier->lignes()
+            ->where('produit_id', $donnees['produit_id'])
+            ->where('variante_id', $donnees['variante_id'] ?? null)
+            ->first();
+
+        if ($ligneExistante) {
+            $ligneExistante->increment('quantite', $donnees['quantite']);
+        } else {
+            $prix = $produit->getPrixPourRestaurant($donnees['restaurant_id']) ?? $produit->prix_base;
+            $modificateur = $donnees['variante_id'] 
+                ? $produit->variantes->find($donnees['variante_id'])?->modificateur_prix ?? 0
+                : 0;
+
+            $panier->lignes()->create([
+                'produit_id' => $donnees['produit_id'],
+                'variante_id' => $donnees['variante_id'] ?? null,
+                'quantite' => $donnees['quantite'],
+                'prix_unitaire' => $prix,
+                'options' => $donnees['options'] ?? null,
+                'notes' => $donnees['notes'] ?? null,
+            ]);
+        }
+
+        $panier->recalculerTotal();
+
+        return back()->with('success', 'Produit ajouté au panier');
+    }
+
+    public function modifier(Request $request, \App\Models\PanierLigne $ligne)
+    {
+        $client = $request->user()->profilClient;
+        $panier = $this->recupererOuCreerPanier($client, $request);
+
+        if ($ligne->panier_id !== $panier->id) {
+            abort(403);
+        }
+
+        $request->validate([
+            'quantite' => 'required|integer|min:1|max:20',
+        ]);
+
+        $ligne->update(['quantite' => $request->quantite]);
+        $panier->recalculerTotal();
+
+        return back()->with('success', 'Panier mis à jour');
+    }
+
+    public function supprimer(Request $request, \App\Models\PanierLigne $ligne)
+    {
+        $client = $request->user()->profilClient;
+        $panier = $this->recupererOuCreerPanier($client, $request);
+
+        if ($ligne->panier_id !== $panier->id) {
+            abort(403);
+        }
+
+        $ligne->delete();
+        $panier->recalculerTotal();
+
+        return back()->with('success', 'Produit retiré du panier');
+    }
+
+    public function appliquerCodePromo(Request $request)
+    {
+        $request->validate(['code' => 'required|string']);
+
+        $client = $request->user()->profilClient;
+        $panier = $this->recupererOuCreerPanier($client, $request);
+
+        $codePromo = CodePromo::where('code', strtoupper($request->code))->first();
+
+        if (!$codePromo) {
+            return back()->with('error', 'Code promo invalide');
+        }
+
+        // Créer une commande factice pour validation
+        $commandeTemporaire = new \App\Models\Commande([
+            'client_id' => $client->id,
+            'restaurant_id' => $panier->restaurant_id,
+            'sous_total' => $panier->sous_total,
+        ]);
+
+        if (!$codePromo->estValidePour($commandeTemporaire)) {
+            return back()->with('error', 'Code promo non applicable');
+        }
+
+        $panier->update(['code_promo_id' => $codePromo->id]);
+        $panier->recalculerTotal();
+
+        $reduction = $codePromo->calculerReduction($panier->sous_total);
+
+        return back()->with('success', "Code promo appliqué : -{$reduction} FCFA");
+    }
+
+    public function retirerCodePromo(Request $request)
+    {
+        $client = $request->user()->profilClient;
+        $panier = $this->recupererOuCreerPanier($client, $request);
+
+        $panier->update(['code_promo_id' => null]);
+        $panier->recalculerTotal();
+
+        return back()->with('success', 'Code promo retiré');
+    }
+
+    private function recupererOuCreerPanier($client, $request, ?string $restaurantId = null): Panier
+    {
+        $query = Panier::where('client_id', $client->id);
+
+        if ($restaurantId) {
+            $query->where('restaurant_id', $restaurantId);
+        }
+
+        return $query->firstOrCreate(
+            $restaurantId ? ['restaurant_id' => $restaurantId] : [],
+            [
+                'restaurant_id' => $restaurantId ?? $request->input('restaurant_id'),
+                'session_id' => $request->session()?->getId(),
+            ]
+        );
+    }
+}
+```
+
+---
+
+## 🔌 10. CONTRÔLEUR WEBHOOKS PAIEMENT
+
+### 10.1 `app/Http/Controllers/Api/V1/WebhookController.php`
+
+```php
+<?php
+
+namespace App\Http\Controllers\Api\V1;
+
+use App\Http\Controllers\Controller;
+use App\Services\PaymentService;
+use Illuminate\Http\Request;
+
+class WebhookController extends Controller
+{
+    public function __construct(
+        private PaymentService $paymentService
+    ) {}
+
+    /**
+     * Webhook Stripe
+     */
+    public function stripe(Request $request)
+    {
+        $payload = $request->getContent();
+        $sigHeader = $request->header('Stripe-Signature');
+
+        try {
+            $event = \Stripe\Webhook::constructEvent(
+                $payload,
+                $sigHeader,
+                config('services.stripe.webhook_secret')
+            );
+
+            $this->paymentService->traiterWebhookStripe($event);
+
+            return response()->json(['status' => 'success'], 200);
+
+        } catch (\Exception $e) {
+            \Log::error('Stripe webhook error: ' . $e->getMessage());
+            return response()->json(['error' => $e->getMessage()], 400);
+        }
+    }
+
+    /**
+     * Webhook MTN Mobile Money
+     */
+    public function mtn(Request $request)
+    {
+        $this->verifierSignatureMtn($request);
+
+        $this->paymentService->traiterWebhookMtn($request->all());
+
+        return response()->json(['status' => 'success'], 200);
+    }
+
+    /**
+     * Webhook Moov Money
+     */
+    public function moov(Request $request)
+    {
+        $this->paymentService->traiterWebhookMoov($request->all());
+        return response()->json(['status' => 'success'], 200);
+    }
+
+    /**
+     * Webhook PayPal
+     */
+    public function paypal(Request $request)
+    {
+        $this->paymentService->traiterWebhookPaypal($request->all());
+        return response()->json(['status' => 'success'], 200);
+    }
+
+    /**
+     * Webhook Orange Money
+     */
+    public function orangeMoney(Request $request)
+    {
+        $this->paymentService->traiterWebhookOrangeMoney($request->all());
+        return response()->json(['status' => 'success'], 200);
+    }
+
+    /**
+     * Webhook Wave
+     */
+    public function wave(Request $request)
+    {
+        $this->paymentService->traiterWebhookWave($request->all());
+        return response()->json(['status' => 'success'], 200);
+    }
+
+    private function verifierSignatureMtn(Request $request): void
+    {
+        // TODO: Implémenter vérification signature MTN
+    }
+}
+```
+
+---
+
+## 📋 11. FORM REQUESTS (EXEMPLES)
+
+### 11.1 `app/Http/Requests/Client/CreerCommandeRequest.php`
+
+```php
+<?php
+
+namespace App\Http\Requests\Client;
+
+use Illuminate\Foundation\Http\FormRequest;
+
+class CreerCommandeRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return true;
+    }
+
+    public function rules(): array
+    {
+        return [
+            'restaurant_id' => ['required', 'exists:restaurants,id'],
+            'type_commande' => ['required', 'in:livraison,retrait,sur_place'],
+            'adresse_livraison_id' => [
+                'required_if:type_commande,livraison',
+                'exists:adresses,id',
+                function ($attribute, $value, $fail) {
+                    if ($value && $value->client_id !== auth()->user()->profilClient->id) {
+                        $fail('Cette adresse ne vous appartient pas.');
+                    }
+                },
+            ],
+            'table_id' => ['required_if:type_commande,sur_place', 'exists:tables_restaurant,id'],
+            'code_promo' => ['nullable', 'string', 'max:50'],
+            'notes_client' => ['nullable', 'string', 'max:500'],
+            'methode_paiement' => ['required', 'string', 'in:carte_bancaire,mtn_mobile_money,moov_money,orange_money,wave,paypal,portefeuille,carte_cadeau,especes_livraison'],
+            'telephone_mobile_money' => [
+                'required_if:methode_paiement,mtn_mobile_money,moov_money,orange_money,wave',
+                'string',
+                'regex:/^[0-9]{10}$/',
+            ],
+            'utiliser_points_fidelite' => ['nullable', 'boolean'],
+            'utiliser_portefeuille' => ['nullable', 'boolean'],
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'restaurant_id.required' => 'Veuillez sélectionner un restaurant.',
+            'type_commande.required' => 'Veuillez choisir le type de commande.',
+            'adresse_livraison_id.required_if' => 'Veuillez sélectionner une adresse de livraison.',
+            'methode_paiement.required' => 'Veuillez choisir un mode de paiement.',
+            'telephone_mobile_money.regex' => 'Le numéro de téléphone doit contenir 10 chiffres.',
+        ];
+    }
+}
+```
+
+---
+
+## 📦 12. API RESOURCES (EXEMPLES)
+
+### 12.1 `app/Http/Resources/V1/RestaurantResource.php`
+
+```php
+<?php
+
+namespace App\Http\Resources\V1;
+
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
+
+class RestaurantResource extends JsonResource
+{
+    public function toArray(Request $request): array
+    {
+        return [
+            'id' => $this->id,
+            'nom' => $this->getTranslation('nom'),
+            'nom_traductions' => $this->getTranslations('nom'),
+            'slug' => $this->slug,
+            'description' => $this->getTranslation('description'),
+            'logo' => $this->logo ? asset('storage/' . $this->logo) : null,
+            'image_couverture' => $this->image_couverture ? asset('storage/' . $this->image_couverture) : null,
+            'telephone' => $this->telephone,
+            'email' => $this->email,
+            'adresse' => $this->adresse,
+            'ville' => $this->ville,
+            'latitude' => (float) $this->latitude,
+            'longitude' => (float) $this->longitude,
+            'note' => (float) $this->note,
+            'total_avis' => $this->total_avis,
+            'est_en_avant' => $this->est_en_avant,
+            'livraison_activee' => $this->livraison_activee,
+            'retrait_active' => $this->retrait_active,
+            'sur_place_active' => $this->sur_place_active,
+            'montant_minimum_commande' => (float) $this->montant_minimum_commande,
+            'temps_preparation' => $this->temps_preparation,
+            'est_ouvert' => $this->estOuvertMaintenant(),
+            'distance' => $this->when($this->distance, fn() => round($this->distance, 2)),
+            'images' => ImageResource::collection($this->whenLoaded('images')),
+            'services' => $this->whenLoaded('services', fn() => $this->services->pluck('service')),
+            'categories' => CategorieResource::collection($this->whenLoaded('categories')),
+            'horaires' => HoraireResource::collection($this->whenLoaded('horaires')),
+            'cree_le' => $this->cree_le?->toIso8601String(),
+        ];
+    }
+}
+```
+
+### 12.2 `app/Http/Resources/V1/CommandeResource.php`
+
+```php
+<?php
+
+namespace App\Http\Resources\V1;
+
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
+
+class CommandeResource extends JsonResource
+{
+    public function toArray(Request $request): array
+    {
+        return [
+            'id' => $this->id,
+            'numero' => $this->numero,
+            'type_commande' => $this->type_commande->value,
+            'type_commande_label' => match($this->type_commande->value) {
+                'livraison' => 'Livraison',
+                'retrait' => 'Retrait',
+                'sur_place' => 'Sur place',
+            },
+            'statut' => $this->statut->value,
+            'statut_label' => $this->statut->label(),
+            'statut_color' => $this->statut->color(),
+            'sous_total' => (float) $this->sous_total,
+            'montant_tva' => (float) $this->montant_tva,
+            'frais_livraison' => (float) $this->frais_livraison,
+            'montant_reduction' => (float) $this->montant_reduction,
+            'montant_total' => (float) $this->montant_total,
+            'notes_client' => $this->notes_client,
+            'temps_preparation_estime' => $this->temps_preparation_estime,
+            'restaurant' => new RestaurantResource($this->whenLoaded('restaurant')),
+            'lignes' => LigneCommandeResource::collection($this->whenLoaded('lignes')),
+            'adresse_livraison' => new AdresseResource($this->whenLoaded('adresseLivraison')),
+            'livraison' => new LivraisonResource($this->whenLoaded('livraison')),
+            'paiement' => new PaiementResource($this->whenLoaded('paiement')),
+            'cree_le' => $this->cree_le?->toIso8601String(),
+        ];
+    }
+}
+```
+
+---
+
+
+
+**Par quoi veux-tu continuer ?** 🎯
