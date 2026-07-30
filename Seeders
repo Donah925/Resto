@@ -1,0 +1,520 @@
+# 🌱 SEEDERS & FACTORIES (Données Réalistes)
+
+Voici la configuration complète pour générer des données de test **réalistes et cohérentes**, basées sur le contexte ivoirien / ouest-africain (noms, villes d'Abidjan, plats locaux, devises XOF, numéros de téléphone réalistes).
+
+---
+
+## ⚙️ 1. PRÉPARATION
+
+Assure-toi que ton fichier `config/database.php` utilise bien le fuseau horaire et les locales appropriées, et que tu as installé `fakerphp/faker` (inclus par défaut dans Laravel).
+
+Nous allons créer des **Factories** (pour générer des données aléatoires mais réalistes) et des **Seeders** (pour orchestrer la création de données spécifiques et cohérentes).
+
+---
+
+## 🏭 2. LES FACTORIES (Usines de données)
+
+### 2.1 `database/Factories/UtilisateurFactory.php`
+
+```php
+<?php
+
+namespace Database\Factories;
+
+use App\Enums\RoleUtilisateur;
+use App\Enums\StatutUtilisateur;
+use App\Models\Utilisateur;
+use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
+
+class UtilisateurFactory extends Factory
+{
+    protected $model = Utilisateur::class;
+
+    // Noms et prénoms réalistes ivoiriens / ouest-africains
+    private array $prenoms = ['Kouamé', 'Yao', 'Koffi', 'Adjoua', 'Awa', 'Moussa', 'Fatou', 'Ibrahim', 'Mariam', 'Jean-Marc', 'Clarisse', 'Seydou'];
+    private array $noms = ['Kouassi', 'Traoré', 'Diallo', 'Koné', 'N\'Guessan', 'Bamba', 'Touré', 'Yapi', 'Coulibaly', 'Kamara'];
+
+    public function definition(): array
+    {
+        $prenom = $this->faker->randomElement($this->prenoms);
+        $nom = $this->faker->randomElement($this->noms);
+        $role = $this->faker->randomElement([RoleUtilisateur::CLIENT, RoleUtilisateur::LIVREUR, RoleUtilisateur::GERANT]);
+
+        // Format téléphone ivoirien réaliste (+225 07 ou 05 XX XX XX XX)
+        $indicatif = $this->faker->randomElement(['07', '05', '01']);
+        $telephone = '+225 ' . $indicatif . ' ' . $this->faker->numerify('## ## ## ##');
+
+        return [
+            'prenom' => $prenom,
+            'nom' => $nom,
+            'email' => strtolower($prenom . '.' . $nom . '.' . $this->faker->unique()->numberBetween(1, 999) . '@gmail.com'),
+            'telephone' => $telephone,
+            'telephone_verifie_le' => now(),
+            'mot_de_passe' => Hash::make('password123'), // Mot de passe par défaut pour les tests
+            'role' => $role,
+            'statut' => StatutUtilisateur::ACTIF,
+            'langue' => 'fr',
+            'fuseau_horaire' => 'Africa/Abidjan',
+            'cree_le' => now(),
+            'modifie_le' => now(),
+        ];
+    }
+
+    public function superadmin(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => RoleUtilisateur::SUPERADMIN,
+            'prenom' => 'Super',
+            'nom' => 'Admin',
+            'email' => 'superadmin@restaurant-app.com',
+        ]);
+    }
+
+    public function client(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => RoleUtilisateur::CLIENT,
+        ]);
+    }
+}
+```
+
+### 2.2 `database/Factories/RestaurantFactory.php`
+
+```php
+<?php
+
+namespace Database\Factories;
+
+use App\Models\Restaurant;
+use Illuminate\Database\Eloquent\Factories\Factory;
+
+class RestaurantFactory extends Factory
+{
+    protected $model = Restaurant::class;
+
+    private array $noms = [
+        ['fr' => 'Le Wafou d\'Abidjan', 'en' => 'The Wafou of Abidjan'],
+        ['fr' => 'Maquis Chez Tantine', 'en' => 'Auntie\'s Maquis'],
+        ['fr' => 'Braise & Saveurs', 'en' => 'Grill & Flavors'],
+        ['fr' => 'Le Toit d\'Abidjan', 'en' => 'The Roof of Abidjan'],
+        ['fr' => 'Attiéké Poisson Royal', 'en' => 'Royal Fish Attiéké'],
+    ];
+
+    private array $quartiers = ['Cocody', 'Marcory', 'Plateau', 'Yopougon', 'Deux Plateaux', 'Angré', 'Riviera'];
+    private array $adresses = ['Rue des Jardins', 'Boulevard de la République', 'Avenue Chardy', 'Rue du Commerce', 'Boulevard Valéry Giscard d\'Estaing'];
+
+    public function definition(): array
+    {
+        $nom = $this->faker->randomElement($this->noms);
+        $quartier = $this->faker->randomElement($this->quartiers);
+        $rue = $this->faker->randomElement($this->adresses);
+        
+        // Coordonnées approximatives d'Abidjan
+        $latitude = $this->faker->randomFloat(6, 5.25, 5.40);
+        $longitude = $this->faker->randomFloat(6, -4.10, -3.90);
+
+        return [
+            'nom' => json_encode($nom),
+            'slug' => str()->slug($nom['fr']),
+            'description' => json_encode(['fr' => 'Le meilleur de la gastronomie locale et internationale.', 'en' => 'The best of local and international gastronomy.']),
+            'telephone' => '+225 07 ' . $this->faker->numerify('## ## ## ##'),
+            'email' => 'contact@' . str()->slug($nom['fr']) . '.ci',
+            'adresse' => $rue . ', ' . $quartier,
+            'ville' => 'Abidjan',
+            'code_postal' => '00225',
+            'pays' => 'Côte d\'Ivoire',
+            'latitude' => $latitude,
+            'longitude' => $longitude,
+            'devise' => 'XOF',
+            'taux_tva' => 18.00,
+            'livraison_activee' => true,
+            'retrait_active' => true,
+            'sur_place_active' => true,
+            'montant_minimum_commande' => $this->faker->randomElement([3000, 5000, 10000]),
+            'rayon_max_livraison' => 15,
+            'temps_preparation' => 30,
+            'statut' => 'actif',
+            'cree_le' => now(),
+            'modifie_le' => now(),
+        ];
+    }
+}
+```
+
+### 2.3 `database/Factories/ProduitFactory.php`
+
+```php
+<?php
+
+namespace Database\Factories;
+
+use App\Models\Produit;
+use App\Models\Categorie;
+use Illuminate\Database\Eloquent\Factories\Factory;
+
+class ProduitFactory extends Factory
+{
+    protected $model = Produit::class;
+
+    private array $plats = [
+        ['fr' => 'Garba Premium', 'en' => 'Premium Garba'],
+        ['fr' => 'Poulet Braisé (1/2)', 'en' => 'Grilled Chicken (1/2)'],
+        ['fr' => 'Attiéké Poisson', 'en' => 'Attiéké with Fish'],
+        ['fr' => 'Kedjenou de Poulet', 'en' => 'Kedjenou Chicken'],
+        ['fr' => 'Riz Gras au Bœuf', 'en' => 'Beef Jollof Rice'],
+        ['fr' => 'Alloco et Poisson', 'en' => 'Alloco and Fish'],
+        ['fr' => 'Burger Gourmet', 'en' => 'Gourmet Burger'],
+        ['fr' => 'Jus de Bissap Frais', 'en' => 'Fresh Hibiscus Juice'],
+        ['fr' => 'Bouillie de Mil', 'en' => 'Millet Porridge'],
+    ];
+
+    public function definition(): array
+    {
+        $plat = $this->faker->randomElement($this->plats);
+        $prix = $this->faker->randomElement([1500, 2000, 2500, 3500, 5000, 7500, 10000, 15000]);
+
+        return [
+            'categorie_id' => Categorie::inRandomOrder()->first()?->id ?? Categorie::factory(),
+            'nom' => json_encode($plat),
+            'slug' => str()->slug($plat['fr']),
+            'description' => json_encode(['fr' => 'Préparé avec des produits frais et locaux.', 'en' => 'Prepared with fresh and local products.']),
+            'prix_base' => $prix,
+            'taux_tva' => 18.00,
+            'calories' => $this->faker->numberBetween(300, 800),
+            'temps_preparation' => $this->faker->randomElement([15, 20, 30, 45]),
+            'est_vegetarien' => $this->faker->boolean(20),
+            'est_halal' => $this->faker->boolean(80),
+            'est_disponible' => true,
+            'ordre_tri' => $this->faker->numberBetween(1, 100),
+            'cree_le' => now(),
+            'modifie_le' => now(),
+        ];
+    }
+}
+```
+
+### 2.4 `database/Factories/ProfilClientFactory.php`
+
+```php
+<?php
+
+namespace Database\Factories;
+
+use App\Models\ProfilClient;
+use App\Models\Utilisateur;
+use Illuminate\Database\Eloquent\Factories\Factory;
+
+class ProfilClientFactory extends Factory
+{
+    protected $model = ProfilClient::class;
+
+    public function definition(): array
+    {
+        return [
+            'utilisateur_id' => Utilisateur::factory()->client(),
+            'points_fidelite' => $this->faker->numberBetween(0, 5000),
+            'total_depense' => $this->faker->randomFloat(2, 10000, 500000),
+            'nombre_commandes' => $this->faker->numberBetween(1, 50),
+            'opt_in_newsletter' => $this->faker->boolean(70),
+            'opt_in_sms' => $this->faker->boolean(60),
+            'code_parrainage' => strtoupper($this->faker->bothify('????####')),
+            'cree_le' => now(),
+            'modifie_le' => now(),
+        ];
+    }
+}
+```
+
+---
+
+## 🌱 3. LES SEEDERS (Remplisseurs de données)
+
+### 3.1 `database/Seeders/SuperAdminSeeder.php`
+
+```php
+<?php
+
+namespace Database\Seeders;
+
+use App\Models\Utilisateur;
+use App\Models\ProfilSuperAdmin;
+use App\Models\Portefeuille;
+use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
+
+class SuperAdminSeeder extends Seeder
+{
+    public function run(): void
+    {
+        $user = Utilisateur::create([
+            'prenom' => 'Administrateur',
+            'nom' => 'Système',
+            'email' => 'admin@restaurant-app.com',
+            'telephone' => '+225 07 00 00 00 00',
+            'telephone_verifie_le' => now(),
+            'mot_de_passe' => Hash::make('Admin@12345'),
+            'role' => 'superadmin',
+            'statut' => 'actif',
+            'langue' => 'fr',
+            'fuseau_horaire' => 'Africa/Abidjan',
+        ]);
+
+        ProfilSuperAdmin::create([
+            'utilisateur_id' => $user->id,
+            'permissions' => ['*'],
+            'notes' => 'Compte principal du super administrateur',
+        ]);
+
+        $this->command->info('✅ Super Admin créé : admin@restaurant-app.com / Admin@12345');
+    }
+}
+```
+
+### 3.2 `database/Seeders/RestaurantMenuSeeder.php` (Le cœur des données réalistes)
+
+```php
+<?php
+
+namespace Database\Seeders;
+
+use App\Models\Restaurant;
+use App\Models\Categorie;
+use App\Models\Produit;
+use App\Models\Allergene;
+use Illuminate\Database\Seeder;
+
+class RestaurantMenuSeeder extends Seeder
+{
+    public function run(): void
+    {
+        $restaurants = [
+            [
+                'nom' => ['fr' => 'Maquis Chez Tantine', 'en' => 'Auntie\'s Maquis'],
+                'slug' => 'maquis-chez-tantine',
+                'quartier' => 'Yopougon',
+                'categories' => [
+                    'Plats de Résistance' => ['Garba Premium', 'Attiéké Poisson', 'Kedjenou de Poulet', 'Riz Gras au Bœuf'],
+                    'Accompagnements' => ['Alloco', 'Igname Pilée', 'Frites de Plantain'],
+                    'Boissons' => ['Jus de Bissap', 'Jus de Gingembre', 'Bière Flag', 'Eau Minérale']
+                ]
+            ],
+            [
+                'nom' => ['fr' => 'Braise & Saveurs', 'en' => 'Grill & Flavors'],
+                'slug' => 'braise-et-saveurs',
+                'quartier' => 'Cocody',
+                'categories' => [
+                    'Grillades' => ['Poulet Braisé (1/2)', 'Poulet Braisé (Entier)', 'Brochettes de Bœuf', 'Poisson Braisé'],
+                    'Burgers & Sandwichs' => ['Burger Gourmet', 'Sandwich Poulet', 'Wrap Végétarien'],
+                    'Desserts' => ['Glace Artisanale', 'Tarte aux Fruits', 'Crème Caramel']
+                ]
+            ]
+        ];
+
+        foreach ($restaurants as $data) {
+            $restaurant = Restaurant::factory()->create([
+                'nom' => json_encode($data['nom']),
+                'slug' => $data['slug'],
+                'ville' => 'Abidjan',
+                'adresse' => $data['quartier'] . ', Abidjan',
+            ]);
+
+            $this->command->info("🍽️ Restaurant créé : {$data['nom']['fr']}");
+
+            foreach ($data['categories'] as $nomCategorie => $plats) {
+                $categorie = Categorie::create([
+                    'restaurant_id' => $restaurant->id,
+                    'nom' => json_encode(['fr' => $nomCategorie, 'en' => $nomCategorie]),
+                    'slug' => str()->slug($nomCategorie),
+                    'est_active' => true,
+                ]);
+
+                foreach ($plats as $plat) {
+                    $produit = Produit::factory()->create([
+                        'categorie_id' => $categorie->id,
+                        'nom' => json_encode(['fr' => $plat, 'en' => $plat]),
+                        'slug' => str()->slug($plat),
+                    ]);
+
+                    // Lier le produit au restaurant avec un prix spécifique
+                    $restaurant->produits()->attach($produit->id, [
+                        'prix' => $produit->prix_base,
+                        'est_disponible' => true,
+                    ]);
+                }
+            }
+        }
+    }
+}
+```
+
+### 3.3 `database/Seeders/UtilisateursEtClientsSeeder.php`
+
+```php
+<?php
+
+namespace Database\Seeders;
+
+use App\Models\Utilisateur;
+use App\Models\ProfilClient;
+use App\Models\ProfilLivreur;
+use App\Models\ProfilGerant;
+use App\Models\Restaurant;
+use App\Models\Portefeuille;
+use App\Models\Adresse;
+use Illuminate\Database\Seeder;
+
+class UtilisateursEtClientsSeeder extends Seeder
+{
+    public function run(): void
+    {
+        // 1. Créer des Gérants pour les restaurants existants
+        $restaurants = Restaurant::all();
+        foreach ($restaurants as $restaurant) {
+            $user = Utilisateur::factory()->create([
+                'role' => 'gerant',
+                'prenom' => 'Gérant',
+                'nom' => $restaurant->getTranslation('nom'),
+                'email' => 'gerant.' . $restaurant->slug . '@restaurant-app.com',
+            ]);
+
+            ProfilGerant::create([
+                'utilisateur_id' => $user->id,
+                'restaurant_id' => $restaurant->id,
+                'salaire' => 150000,
+                'taux_commission' => 5.00,
+            ]);
+
+            $this->command->info("👨‍💼 Gérant créé pour : {$restaurant->getTranslation('nom')}");
+        }
+
+        // 2. Créer des Livreurs
+        for ($i = 0; $i < 5; $i++) {
+            $user = Utilisateur::factory()->create(['role' => 'livreur']);
+            
+            ProfilLivreur::create([
+                'utilisateur_id' => $user->id,
+                'type_vehicule' => collect(['velo', 'scooter', 'voiture'])->random(),
+                'immatriculation' => 'AB-' . $this->faker->numerify('###') . '-CI',
+                'note' => $this->faker->randomFloat(2, 4.0, 5.0),
+                'est_disponible' => true,
+                'latitude_courante' => $this->faker->randomFloat(6, 5.30, 5.35),
+                'longitude_courante' => $this->faker->randomFloat(6, -4.05, -3.95),
+            ]);
+        }
+        $this->command->info('🛵 5 Livreurs créés');
+
+        // 3. Créer des Clients avec adresses et portefeuilles
+        for ($i = 0; $i < 10; $i++) {
+            $profilClient = ProfilClient::factory()->create();
+            $user = $profilClient->utilisateur;
+
+            // Créer un portefeuille pour chaque client
+            Portefeuille::create([
+                'client_id' => $profilClient->id,
+                'solde' => $this->faker->randomFloat(2, 5000, 50000),
+                'devise' => 'XOF',
+            ]);
+
+            // Créer une adresse par défaut
+            Adresse::create([
+                'client_id' => $profilClient->id,
+                'libelle' => 'Maison',
+                'adresse_voie' => $this->faker->streetAddress(),
+                'ville' => 'Abidjan',
+                'region' => 'Abidjan',
+                'code_postal' => '00225',
+                'pays' => 'Côte d\'Ivoire',
+                'latitude' => $this->faker->randomFloat(6, 5.25, 5.40),
+                'longitude' => $this->faker->randomFloat(6, -4.10, -3.90),
+                'est_par_defaut' => true,
+            ]);
+
+            // Mettre à jour le profil avec l'ID de l'adresse par défaut
+            $adresse = Adresse::where('client_id', $profilClient->id)->first();
+            $profilClient->update(['adresse_par_defaut_id' => $adresse->id]);
+        }
+        $this->command->info('👥 10 Clients créés avec portefeuille et adresse');
+    }
+}
+```
+
+### 3.4 `database/Seeders/DatabaseSeeder.php` (Le chef d'orchestre)
+
+```php
+<?php
+
+namespace Database\Seeders;
+
+use Illuminate\Database\Seeder;
+
+class DatabaseSeeder extends Seeder
+{
+    /**
+     * Seed the application's database.
+     */
+    public function run(): void
+    {
+        $this->command->info('🚀 Début du remplissage de la base de données...');
+
+        // 1. Données de base (Allergènes, Rôles, etc.)
+        $this->call([
+            RoleAndPermissionSeeder::class, // (À créer si tu utilises Spatie, sinon ignore)
+            AllergeneSeeder::class,
+        ]);
+
+        // 2. Entités principales
+        $this->call([
+            SuperAdminSeeder::class,
+            RestaurantMenuSeeder::class,
+            UtilisateursEtClientsSeeder::class,
+        ]);
+
+        // 3. Données de test (Commandes, Réservations) - Optionnel mais recommandé
+        // $this->call(CommandeSeeder::class);
+
+        $this->command->info('✅ Remplissage de la base de données terminé avec succès !');
+        $this->command->info('📧 SuperAdmin: admin@restaurant-app.com | Mot de passe: Admin@12345');
+    }
+}
+```
+
+### 3.5 `database/Seeders/AllergeneSeeder.php` (Données de référence)
+
+```php
+<?php
+
+namespace Database\Seeders;
+
+use App\Models\Allergene;
+use Illuminate\Database\Seeder;
+
+class AllergeneSeeder extends Seeder
+{
+    public function run(): void
+    {
+        $allergenes = [
+            ['fr' => 'Arachides', 'icone' => '🥜'],
+            ['fr' => 'Gluten', 'icone' => '🌾'],
+            ['fr' => 'Lait / Lactose', 'icone' => '🥛'],
+            ['fr' => 'Fruits à coque', 'icone' => '🌰'],
+            ['fr' => 'Poisson', 'icone' => '🐟'],
+            ['fr' => 'Crustacés', 'icone' => '🦐'],
+            ['fr' => 'Œufs', 'icone' => '🥚'],
+            ['fr' => 'Soja', 'icone' => '🫘'],
+        ];
+
+        foreach ($allergenes as $allergene) {
+            Allergene::create([
+                'nom' => json_encode($allergene),
+                'icone' => $allergene['icone'],
+            ]);
+        }
+
+        $this->command->info('🥜 Allergènes de référence créés');
+    }
+}
+```
+
