@@ -1,0 +1,1239 @@
+# 🔐 POLICIES & AUTORISATIONS - LARAVEL RESTAURANT
+
+Voici le système complet d'autorisations pour sécuriser ton application. Je vais utiliser **Spatie Permission** combiné avec les **Policies Laravel** pour une sécurité maximale.
+
+---
+
+## 📊 1. MATRICE D'AUTORISATION
+
+Avant de coder, visualisons qui peut faire quoi :
+
+| Ressource | SuperAdmin | Admin | Gérant | Livreur | Client |
+|---|:---:|:---:|:---:|:---:|:---:|
+| **Restaurants** | Tout | Voir ses restaurants | Modifier le sien | ❌ | Voir uniquement |
+| **Produits** | Tout | Tout (ses restaurants) | Tout (son restaurant) | ❌ | Voir uniquement |
+| **Commandes** | Tout | Voir (ses restaurants) | Tout (son restaurant) | Voir les siennes | Voir les siennes |
+| **Réservations** | Tout | Voir (ses restaurants) | Tout (son restaurant) | ❌ | Créer/voir les siennes |
+| **Livraisons** | Tout | Voir (ses restaurants) | Assigner (son restaurant) | Gérer les siennes | Voir les siennes |
+| **Paiements** | Tout | Voir | Voir (son restaurant) | ❌ | Voir les siens |
+| **Avis** | Tout | Voir | Répondre | Voir ses évaluations | Créer/voir les siens |
+| **Utilisateurs** | Tout | Voir | ❌ | ❌ | Soi-même |
+| **Statistiques** | Tout | Ses restaurants | Son restaurant | Ses gains | ❌ |
+
+---
+
+## ⚙️ 2. CONFIGURATION SPATIE PERMISSION
+
+### 2.1 Installation (si pas déjà fait)
+
+```bash
+composer require spatie/laravel-permission
+php artisan vendor:publish --provider="Spatie\Permission\PermissionServiceProvider"
+```
+
+### 2.2 Configuration `config/permission.php`
+
+Adapte ces lignes dans le fichier publié :
+
+```php
+return [
+    'models' => [
+        'permission' => App\Models\Permission::class,
+        'role' => App\Models\Role::class,
+    ],
+
+    'table_names' => [
+        'roles' => 'roles',
+        'permissions' => 'permissions',
+        'model_has_permissions' => 'model_has_permissions',
+        'model_has_roles' => 'model_has_roles',
+        'role_has_permissions' => 'role_has_permissions',
+    ],
+
+    'column_names' => [
+        'role_pivot_key' => null,
+        'permission_pivot_key' => null,
+        'model_morph_key' => 'model_id',
+        'team_foreign_key' => 'team_id',
+    ],
+
+    'display_permission_in_exception' => false,
+    'display_role_in_exception' => false,
+    'enable_permission' => true,
+];
+```
+
+### 2.3 Adapter le modèle `Utilisateur`
+
+Dans `app/Models/Utilisateur.php`, ajoute le trait `HasRoles` (déjà présent dans le modèle créé précédemment) :
+
+```php
+use Spatie\Permission\Traits\HasRoles;
+
+class Utilisateur extends Authenticatable
+{
+    use HasUuids, Notifiable, HasApiTokens, HasRoles, SoftDeletes;
+    
+    // ... reste du code
+}
+```
+
+---
+
+## 🌱 3. SEEDER DES RÔLES ET PERMISSIONS
+
+### 3.1 `database/Seeders/RoleAndPermissionSeeder.php`
+
+```php
+<?php
+
+namespace Database\Seeders;
+
+use App\Models\Role;
+use App\Models\Permission;
+use App\Models\Utilisateur;
+use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
+
+class RoleAndPermissionSeeder extends Seeder
+{
+    public function run(): void
+    {
+        // Réinitialiser le cache des permissions
+        app()[\Spatie\Permission\PermissionRegistrar::class]->forgetCachedPermissions();
+
+        // ===== CRÉATION DES PERMISSIONS =====
+        
+        $permissions = [
+            // Restaurants
+            'restaurants.voir',
+            'restaurants.creer',
+            'restaurants.modifier',
+            'restaurants.supprimer',
+            'restaurants.gerer_horaires',
+            'restaurants.gerer_salles',
+            
+            // Menu & Produits
+            'menu.voir',
+            'menu.creer',
+            'menu.modifier',
+            'menu.supprimer',
+            'menu.gerer_categories',
+            'menu.gerer_allergenes',
+            'menu.gerer_promotions',
+            
+            // Commandes
+            'commandes.voir_toutes',
+            'commandes.voir_siennes',
+            'commandes.modifier_statut',
+            'commandes.annuler',
+            'commandes.rembourser',
+            'commandes.voir_cuisine', // Accès au Kitchen Display
+            
+            // Réservations
+            'reservations.voir_toutes',
+            'reservations.voir_siennes',
+            'reservations.creer',
+            'reservations.modifier_statut',
+            'reservations.annuler',
+            
+            // Livraisons
+            'livraisons.voir_toutes',
+            'livraisons.voir_siennes',
+            'livraisons.assigner_livreur',
+            'livraisons.modifier_statut',
+            'livraisons.gerer_zones',
+            
+            // Paiements
+            'paiements.voir_tous',
+            'paiements.voir_siens',
+            'paiements.rembourser',
+            'paiements.gerer_configurations',
+            
+            // Avis
+            'avis.voir_tous',
+            'avis.voir_siens',
+            'avis.repondre',
+            'avis.moderer',
+            
+            // Utilisateurs
+            'utilisateurs.voir_tous',
+            'utilisateurs.creer',
+            'utilisateurs.modifier',
+            'utilisateurs.supprimer',
+            'utilisateurs.gerer_roles',
+            
+            // Livreurs
+            'livreurs.voir_tous',
+            'livreurs.creer',
+            'livreurs.modifier',
+            'livreurs.supprimer',
+            'livreurs.gerer_planning',
+            
+            // Clients
+            'clients.voir_tous',
+            'clients.voir_profil',
+            'clients.modifier_siens',
+            
+            // Marketing
+            'marketing.voir',
+            'marketing.creer',
+            'marketing.modifier',
+            'marketing.supprimer',
+            'marketing.gerer_codes_promo',
+            'marketing.gerer_newsletter',
+            'marketing.gerer_cartes_cadeau',
+            
+            // Statistiques
+            'statistiques.voir_globales',
+            'statistiques.voir_restaurant',
+            'statistiques.voir_siennes',
+            
+            // Support
+            'support.voir_tous',
+            'support.repondre',
+            'support.creer',
+            
+            // Paramètres
+            'parametres.voir',
+            'parametres.modifier',
+            'parametres.gerer_paiements',
+            
+            // Audit
+            'audit.voir_logs',
+        ];
+
+        foreach ($permissions as $permission) {
+            Permission::firstOrCreate(['nom' => $permission, 'guard_name' => 'web']);
+        }
+
+        $this->command->info('✅ ' . count($permissions) . ' permissions créées');
+
+        // ===== CRÉATION DES RÔLES =====
+        
+        $superadmin = Role::firstOrCreate(['nom' => 'superadmin', 'guard_name' => 'web']);
+        $admin = Role::firstOrCreate(['nom' => 'admin', 'guard_name' => 'web']);
+        $gerant = Role::firstOrCreate(['nom' => 'gerant', 'guard_name' => 'web']);
+        $livreur = Role::firstOrCreate(['nom' => 'livreur', 'guard_name' => 'web']);
+        $client = Role::firstOrCreate(['nom' => 'client', 'guard_name' => 'web']);
+
+        // ===== ATTRIBUTION DES PERMISSIONS =====
+
+        // SuperAdmin : TOUT
+        $superadmin->syncPermissions(Permission::all());
+
+        // Admin : Presque tout, sauf gestion globale des utilisateurs
+        $admin->syncPermissions([
+            'restaurants.voir', 'restaurants.modifier', 'restaurants.gerer_horaires',
+            'menu.voir', 'menu.creer', 'menu.modifier', 'menu.supprimer',
+            'menu.gerer_categories', 'menu.gerer_promotions',
+            'commandes.voir_toutes', 'commandes.modifier_statut', 'commandes.annuler',
+            'reservations.voir_toutes', 'reservations.modifier_statut',
+            'livraisons.voir_toutes', 'livraisons.assigner_livreur',
+            'paiements.voir_tous',
+            'avis.voir_tous', 'avis.repondre', 'avis.moderer',
+            'utilisateurs.voir_tous', 'utilisateurs.creer', 'utilisateurs.modifier',
+            'livreurs.voir_tous', 'livreurs.creer', 'livreurs.modifier', 'livreurs.gerer_planning',
+            'clients.voir_tous',
+            'marketing.voir', 'marketing.creer', 'marketing.modifier',
+            'marketing.gerer_codes_promo', 'marketing.gerer_newsletter',
+            'statistiques.voir_restaurant',
+            'support.voir_tous', 'support.repondre',
+            'parametres.voir', 'parametres.modifier',
+        ]);
+
+        // Gérant : Tout pour SON restaurant
+        $gerant->syncPermissions([
+            'restaurants.voir', 'restaurants.modifier', 'restaurants.gerer_horaires', 'restaurants.gerer_salles',
+            'menu.voir', 'menu.creer', 'menu.modifier', 'menu.supprimer',
+            'menu.gerer_categories', 'menu.gerer_allergenes', 'menu.gerer_promotions',
+            'commandes.voir_toutes', 'commandes.modifier_statut', 'commandes.annuler', 'commandes.voir_cuisine',
+            'reservations.voir_toutes', 'reservations.modifier_statut', 'reservations.annuler',
+            'livraisons.voir_toutes', 'livraisons.assigner_livreur', 'livraisons.gerer_zones',
+            'paiements.voir_tous',
+            'avis.voir_tous', 'avis.repondre',
+            'livreurs.voir_tous',
+            'clients.voir_tous',
+            'marketing.voir', 'marketing.gerer_codes_promo',
+            'statistiques.voir_restaurant',
+            'support.voir_tous', 'support.repondre',
+            'parametres.voir',
+        ]);
+
+        // Livreur : Accès limité à ses livraisons et profil
+        $livreur->syncPermissions([
+            'livraisons.voir_siennes',
+            'livraisons.modifier_statut',
+            'statistiques.voir_siennes',
+            'clients.voir_profil',
+            'support.creer',
+        ]);
+
+        // Client : Accès à ses propres données
+        $client->syncPermissions([
+            'restaurants.voir',
+            'menu.voir',
+            'commandes.voir_siennes',
+            'commandes.creer', // Via le panier
+            'reservations.voir_siennes',
+            'reservations.creer',
+            'paiements.voir_siens',
+            'avis.voir_siens',
+            'clients.voir_profil',
+            'clients.modifier_siens',
+            'support.creer',
+        ]);
+
+        $this->command->info('✅ Rôles et permissions attribués');
+
+        // ===== CRÉATION DU SUPER ADMIN =====
+        
+        $superadminUser = Utilisateur::firstOrCreate(
+            ['email' => 'admin@restaurant-app.com'],
+            [
+                'prenom' => 'Administrateur',
+                'nom' => 'Système',
+                'telephone' => '+225 07 00 00 00 00',
+                'telephone_verifie_le' => now(),
+                'mot_de_passe' => bcrypt('Admin@12345'),
+                'role' => 'superadmin',
+                'statut' => 'actif',
+                'langue' => 'fr',
+                'fuseau_horaire' => 'Africa/Abidjan',
+            ]
+        );
+
+        $superadminUser->assignRole($superadmin);
+
+        $this->command->info('✅ Super Admin créé : admin@restaurant-app.com / Admin@12345');
+    }
+}
+```
+
+---
+
+## 🛡️ 4. LES POLICIES
+
+### 4.1 `app/Policies/RestaurantPolicy.php`
+
+```php
+<?php
+
+namespace App\Policies;
+
+use App\Models\Utilisateur;
+use App\Models\Restaurant;
+use App\Enums\RoleUtilisateur;
+
+class RestaurantPolicy
+{
+    /**
+     * Qui peut voir la liste des restaurants ?
+     */
+    public function viewAny(Utilisateur $user): bool
+    {
+        return true; // Tout le monde peut voir les restaurants (public)
+    }
+
+    /**
+     * Qui peut voir un restaurant spécifique ?
+     */
+    public function view(Utilisateur $user, Restaurant $restaurant): bool
+    {
+        return true; // Public
+    }
+
+    /**
+     * Qui peut créer un restaurant ?
+     */
+    public function create(Utilisateur $user): bool
+    {
+        return $user->role === RoleUtilisateur::SUPERADMIN;
+    }
+
+    /**
+     * Qui peut modifier un restaurant ?
+     */
+    public function update(Utilisateur $user, Restaurant $restaurant): bool
+    {
+        // SuperAdmin : toujours
+        if ($user->role === RoleUtilisateur::SUPERADMIN) {
+            return true;
+        }
+
+        // Admin : s'il est assigné au restaurant
+        if ($user->role === RoleUtilisateur::ADMIN) {
+            return $user->profilAdmin?->restaurants()
+                ->where('restaurants.id', $restaurant->id)
+                ->exists() ?? false;
+        }
+
+        // Gérant : si c'est SON restaurant
+        if ($user->role === RoleUtilisateur::GERANT) {
+            return $user->profilGerant?->restaurant_id === $restaurant->id;
+        }
+
+        return false;
+    }
+
+    /**
+     * Qui peut supprimer un restaurant ?
+     */
+    public function delete(Utilisateur $user, Restaurant $restaurant): bool
+    {
+        return $user->role === RoleUtilisateur::SUPERADMIN;
+    }
+
+    /**
+     * Qui peut gérer les horaires ?
+     */
+    public function gererHoraires(Utilisateur $user, Restaurant $restaurant): bool
+    {
+        return $this->update($user, $restaurant);
+    }
+
+    /**
+     * Qui peut voir les statistiques d'un restaurant ?
+     */
+    public function voirStatistiques(Utilisateur $user, Restaurant $restaurant): bool
+    {
+        return $this->update($user, $restaurant);
+    }
+}
+```
+
+### 4.2 `app/Policies/ProduitPolicy.php`
+
+```php
+<?php
+
+namespace App\Policies;
+
+use App\Models\Utilisateur;
+use App\Models\Produit;
+use App\Enums\RoleUtilisateur;
+
+class ProduitPolicy
+{
+    public function viewAny(Utilisateur $user): bool
+    {
+        return true; // Public
+    }
+
+    public function view(Utilisateur $user, Produit $produit): bool
+    {
+        return true; // Public
+    }
+
+    public function create(Utilisateur $user): bool
+    {
+        return in_array($user->role, [
+            RoleUtilisateur::SUPERADMIN,
+            RoleUtilisateur::ADMIN,
+            RoleUtilisateur::GERANT,
+        ]);
+    }
+
+    public function update(Utilisateur $user, Produit $produit): bool
+    {
+        if ($user->role === RoleUtilisateur::SUPERADMIN) {
+            return true;
+        }
+
+        if ($user->role === RoleUtilisateur::ADMIN) {
+            // Vérifier que le produit appartient à un de ses restaurants
+            $restaurantIds = $user->profilAdmin?->restaurants->pluck('id') ?? [];
+            return $produit->categorie->restaurant_id 
+                && in_array($produit->categorie->restaurant_id, $restaurantIds->toArray());
+        }
+
+        if ($user->role === RoleUtilisateur::GERANT) {
+            return $produit->categorie->restaurant_id === $user->profilGerant?->restaurant_id;
+        }
+
+        return false;
+    }
+
+    public function delete(Utilisateur $user, Produit $produit): bool
+    {
+        return $this->update($user, $produit);
+    }
+}
+```
+
+### 4.3 `app/Policies/CommandePolicy.php`
+
+```php
+<?php
+
+namespace App\Policies;
+
+use App\Models\Utilisateur;
+use App\Models\Commande;
+use App\Enums\RoleUtilisateur;
+
+class CommandePolicy
+{
+    public function viewAny(Utilisateur $user): bool
+    {
+        return in_array($user->role, [
+            RoleUtilisateur::SUPERADMIN,
+            RoleUtilisateur::ADMIN,
+            RoleUtilisateur::GERANT,
+            RoleUtilisateur::LIVREUR,
+            RoleUtilisateur::CLIENT,
+        ]);
+    }
+
+    public function view(Utilisateur $user, Commande $commande): bool
+    {
+        // SuperAdmin : tout voir
+        if ($user->role === RoleUtilisateur::SUPERADMIN) {
+            return true;
+        }
+
+        // Admin : voir les commandes de ses restaurants
+        if ($user->role === RoleUtilisateur::ADMIN) {
+            return $user->profilAdmin?->restaurants()
+                ->where('restaurants.id', $commande->restaurant_id)
+                ->exists() ?? false;
+        }
+
+        // Gérant : voir les commandes de SON restaurant
+        if ($user->role === RoleUtilisateur::GERANT) {
+            return $commande->restaurant_id === $user->profilGerant?->restaurant_id;
+        }
+
+        // Livreur : voir les commandes qu'il livre
+        if ($user->role === RoleUtilisateur::LIVREUR) {
+            return $commande->livreur_id === $user->profilLivreur?->id;
+        }
+
+        // Client : voir SES commandes
+        if ($user->role === RoleUtilisateur::CLIENT) {
+            return $commande->client_id === $user->profilClient?->id;
+        }
+
+        return false;
+    }
+
+    public function modifierStatut(Utilisateur $user, Commande $commande): bool
+    {
+        // Gérant du restaurant
+        if ($user->role === RoleUtilisateur::GERANT) {
+            return $commande->restaurant_id === $user->profilGerant?->restaurant_id;
+        }
+
+        // Admin des restaurants concernés
+        if ($user->role === RoleUtilisateur::ADMIN) {
+            return $user->profilAdmin?->restaurants()
+                ->where('restaurants.id', $commande->restaurant_id)
+                ->exists() ?? false;
+        }
+
+        return $user->role === RoleUtilisateur::SUPERADMIN;
+    }
+
+    public function annuler(Utilisateur $user, Commande $commande): bool
+    {
+        // Le client peut annuler sa propre commande (si annulable)
+        if ($user->role === RoleUtilisateur::CLIENT) {
+            return $commande->client_id === $user->profilClient?->id && $commande->estAnnulable();
+        }
+
+        // Gérant/Admin/SuperAdmin
+        return $this->modifierStatut($user, $commande);
+    }
+
+    public function rembourser(Utilisateur $user, Commande $commande): bool
+    {
+        return in_array($user->role, [
+            RoleUtilisateur::SUPERADMIN,
+            RoleUtilisateur::ADMIN,
+            RoleUtilisateur::GERANT,
+        ]) && $this->view($user, $commande);
+    }
+}
+```
+
+### 4.4 `app/Policies/LivraisonPolicy.php`
+
+```php
+<?php
+
+namespace App\Policies;
+
+use App\Models\Utilisateur;
+use App\Models\Livraison;
+use App\Enums\RoleUtilisateur;
+
+class LivraisonPolicy
+{
+    public function view(Utilisateur $user, Livraison $livraison): bool
+    {
+        if ($user->role === RoleUtilisateur::SUPERADMIN) {
+            return true;
+        }
+
+        if ($user->role === RoleUtilisateur::ADMIN) {
+            return $user->profilAdmin?->restaurants()
+                ->where('restaurants.id', $livraison->commande->restaurant_id)
+                ->exists() ?? false;
+        }
+
+        if ($user->role === RoleUtilisateur::GERANT) {
+            return $livraison->commande->restaurant_id === $user->profilGerant?->restaurant_id;
+        }
+
+        if ($user->role === RoleUtilisateur::LIVREUR) {
+            return $livraison->livreur_id === $user->profilLivreur?->id;
+        }
+
+        if ($user->role === RoleUtilisateur::CLIENT) {
+            return $livraison->commande->client_id === $user->profilClient?->id;
+        }
+
+        return false;
+    }
+
+    public function assignerLivreur(Utilisateur $user, Livraison $livraison): bool
+    {
+        if ($user->role === RoleUtilisateur::SUPERADMIN) {
+            return true;
+        }
+
+        if ($user->role === RoleUtilisateur::GERANT) {
+            return $livraison->commande->restaurant_id === $user->profilGerant?->restaurant_id;
+        }
+
+        return false;
+    }
+
+    public function modifierStatut(Utilisateur $user, Livraison $livraison): bool
+    {
+        // Le livreur assigné peut modifier le statut
+        if ($user->role === RoleUtilisateur::LIVREUR) {
+            return $livraison->livreur_id === $user->profilLivreur?->id;
+        }
+
+        // Gérant/SuperAdmin
+        return $this->assignerLivreur($user, $livraison);
+    }
+}
+```
+
+### 4.5 `app/Policies/ReservationPolicy.php`
+
+```php
+<?php
+
+namespace App\Policies;
+
+use App\Models\Utilisateur;
+use App\Models\Reservation;
+use App\Enums\RoleUtilisateur;
+
+class ReservationPolicy
+{
+    public function view(Utilisateur $user, Reservation $reservation): bool
+    {
+        if ($user->role === RoleUtilisateur::SUPERADMIN) {
+            return true;
+        }
+
+        if ($user->role === RoleUtilisateur::GERANT) {
+            return $reservation->restaurant_id === $user->profilGerant?->restaurant_id;
+        }
+
+        if ($user->role === RoleUtilisateur::CLIENT) {
+            return $reservation->client_id === $user->profilClient?->id;
+        }
+
+        return false;
+    }
+
+    public function create(Utilisateur $user): bool
+    {
+        return $user->role === RoleUtilisateur::CLIENT;
+    }
+
+    public function modifierStatut(Utilisateur $user, Reservation $reservation): bool
+    {
+        if ($user->role === RoleUtilisateur::SUPERADMIN) {
+            return true;
+        }
+
+        if ($user->role === RoleUtilisateur::GERANT) {
+            return $reservation->restaurant_id === $user->profilGerant?->restaurant_id;
+        }
+
+        return false;
+    }
+
+    public function annuler(Utilisateur $user, Reservation $reservation): bool
+    {
+        // Le client peut annuler sa propre réservation
+        if ($user->role === RoleUtilisateur::CLIENT) {
+            return $reservation->client_id === $user->profilClient?->id;
+        }
+
+        return $this->modifierStatut($user, $reservation);
+    }
+}
+```
+
+### 4.6 `app/Policies/AvisPolicy.php`
+
+```php
+<?php
+
+namespace App\Policies;
+
+use App\Models\Utilisateur;
+use App\Models\Avi;
+use App\Enums\RoleUtilisateur;
+
+class AvisPolicy
+{
+    public function view(Utilisateur $user, Avi $avis): bool
+    {
+        return $avis->est_visible || $this->peutModerer($user, $avis);
+    }
+
+    public function create(Utilisateur $user): bool
+    {
+        return $user->role === RoleUtilisateur::CLIENT;
+    }
+
+    public function repondre(Utilisateur $user, Avi $avis): bool
+    {
+        if ($user->role === RoleUtilisateur::SUPERADMIN) {
+            return true;
+        }
+
+        if ($user->role === RoleUtilisateur::GERANT) {
+            return $avis->restaurant_id === $user->profilGerant?->restaurant_id;
+        }
+
+        return false;
+    }
+
+    public function moderer(Utilisateur $user, Avi $avis): bool
+    {
+        return in_array($user->role, [
+            RoleUtilisateur::SUPERADMIN,
+            RoleUtilisateur::ADMIN,
+        ]);
+    }
+
+    private function peutModerer(Utilisateur $user, Avi $avis): bool
+    {
+        // Le client peut voir son propre avis même s'il est masqué
+        if ($user->role === RoleUtilisateur::CLIENT) {
+            return $avis->client_id === $user->profilClient?->id;
+        }
+
+        return $this->repondre($user, $avis);
+    }
+}
+```
+
+### 4.7 `app/Policies/TicketSupportPolicy.php`
+
+```php
+<?php
+
+namespace App\Policies;
+
+use App\Models\Utilisateur;
+use App\Models\TicketSupport;
+use App\Enums\RoleUtilisateur;
+
+class TicketSupportPolicy
+{
+    public function view(Utilisateur $user, TicketSupport $ticket): bool
+    {
+        // SuperAdmin/Admin/Gérant : voir tous les tickets
+        if (in_array($user->role, [
+            RoleUtilisateur::SUPERADMIN,
+            RoleUtilisateur::ADMIN,
+            RoleUtilisateur::GERANT,
+        ])) {
+            return true;
+        }
+
+        // Client : voir ses propres tickets
+        if ($user->role === RoleUtilisateur::CLIENT) {
+            return $ticket->client_id === $user->profilClient?->id;
+        }
+
+        return false;
+    }
+
+    public function create(Utilisateur $user): bool
+    {
+        return true; // Tout utilisateur connecté peut créer un ticket
+    }
+
+    public function repondre(Utilisateur $user, TicketSupport $ticket): bool
+    {
+        // Le client peut répondre à ses propres tickets
+        if ($user->role === RoleUtilisateur::CLIENT) {
+            return $ticket->client_id === $user->profilClient?->id;
+        }
+
+        // Le staff peut répondre à tous les tickets
+        return in_array($user->role, [
+            RoleUtilisateur::SUPERADMIN,
+            RoleUtilisateur::ADMIN,
+            RoleUtilisateur::GERANT,
+        ]);
+    }
+}
+```
+
+---
+
+## 🔌 5. ENREGISTREMENT DES POLICIES
+
+### 5.1 `app/Providers/AuthServiceProvider.php`
+
+```php
+<?php
+
+namespace App\Providers;
+
+use App\Models\Restaurant;
+use App\Models\Produit;
+use App\Models\Commande;
+use App\Models\Livraison;
+use App\Models\Reservation;
+use App\Models\Avi;
+use App\Models\TicketSupport;
+use App\Policies\RestaurantPolicy;
+use App\Policies\ProduitPolicy;
+use App\Policies\CommandePolicy;
+use App\Policies\LivraisonPolicy;
+use App\Policies\ReservationPolicy;
+use App\Policies\AvisPolicy;
+use App\Policies\TicketSupportPolicy;
+use Illuminate\Foundation\Support\Providers\AuthServiceProvider as ServiceProvider;
+use Illuminate\Support\Facades\Gate;
+
+class AuthServiceProvider extends ServiceProvider
+{
+    protected $policies = [
+        Restaurant::class => RestaurantPolicy::class,
+        Produit::class => ProduitPolicy::class,
+        Commande::class => CommandePolicy::class,
+        Livraison::class => LivraisonPolicy::class,
+        Reservation::class => ReservationPolicy::class,
+        Avi::class => AvisPolicy::class,
+        TicketSupport::class => TicketSupportPolicy::class,
+    ];
+
+    public function boot(): void
+    {
+        $this->registerPolicies();
+
+        // Gate global : SuperAdmin peut tout faire
+        Gate::before(function ($user, $ability) {
+            if ($user->role->value === 'superadmin') {
+                return true;
+            }
+        });
+    }
+}
+```
+
+---
+
+## 🚦 6. MIDDLEWARES DE VÉRIFICATION
+
+### 6.1 `app/Http/Middleware/CheckPermission.php`
+
+```php
+<?php
+
+namespace App\Http\Middleware;
+
+use Closure;
+use Illuminate\Http\Request;
+
+class CheckPermission
+{
+    public function handle(Request $request, Closure $next, string $permission)
+    {
+        if (!$request->user()) {
+            return redirect()->route('login');
+        }
+
+        if (!$request->user()->can($permission)) {
+            if ($request->wantsJson()) {
+                return response()->json([
+                    'message' => 'Vous n\'avez pas la permission d\'effectuer cette action.',
+                    'permission_requise' => $permission,
+                ], 403);
+            }
+
+            abort(403, 'Accès non autorisé.');
+        }
+
+        return $next($request);
+    }
+}
+```
+
+### 6.2 Enregistrement dans `bootstrap/app.php`
+
+```php
+->withMiddleware(function (Middleware $middleware) {
+    $middleware->alias([
+        'role' => \App\Http\Middleware\RoleMiddleware::class,
+        'permission' => \App\Http\Middleware\CheckPermission::class,
+        'restaurant.access' => \App\Http\Middleware\RestaurantAccessMiddleware::class,
+        'livreur.disponible' => \App\Http\Middleware\LivreurDisponibleMiddleware::class,
+    ]);
+})
+```
+
+---
+
+## 🎯 7. UTILISATION DANS LES CONTRÔLEURS
+
+### 7.1 Exemple : `Gerant/ProduitController.php`
+
+```php
+<?php
+
+namespace App\Http\Controllers\Gerant;
+
+use App\Http\Controllers\Controller;
+use App\Models\Produit;
+use Illuminate\Http\Request;
+
+class ProduitController extends Controller
+{
+    public function __construct()
+    {
+        // Appliquer la policy automatiquement
+        $this->authorizeResource(Produit::class);
+    }
+
+    public function index(Request $request)
+    {
+        // Vérifier la permission Spatie
+        $this->authorize('viewAny', Produit::class);
+
+        $restaurantId = $request->user()->profilGerant->restaurant_id;
+        
+        $produits = Produit::dansRestaurant($restaurantId)
+            ->with(['categorie', 'images'])
+            ->paginate(20);
+
+        return view('gerant.produits.index', compact('produits'));
+    }
+
+    public function store(Request $request)
+    {
+        // La policy vérifie automatiquement l'accès
+        $this->authorize('create', Produit::class);
+
+        $donnees = $request->validate([...]);
+        
+        $produit = Produit::create($donnees);
+
+        return redirect()->route('gerant.produits.show', $produit)
+            ->with('success', 'Produit créé');
+    }
+
+    public function update(Request $request, Produit $produit)
+    {
+        // Autorisation automatique via policy
+        $this->authorize('update', $produit);
+
+        $produit->update($request->validated());
+
+        return redirect()->route('gerant.produits.show', $produit)
+            ->with('success', 'Produit mis à jour');
+    }
+
+    public function destroy(Produit $produit)
+    {
+        $this->authorize('delete', $produit);
+
+        $produit->delete();
+
+        return redirect()->route('gerant.produits.index')
+            ->with('success', 'Produit supprimé');
+    }
+}
+```
+
+### 7.2 Exemple : `Client/CommandeController.php`
+
+```php
+<?php
+
+namespace App\Http\Controllers\Client;
+
+use App\Http\Controllers\Controller;
+use App\Models\Commande;
+use Illuminate\Http\Request;
+
+class CommandeController extends Controller
+{
+    public function show(Commande $commande, Request $request)
+    {
+        // La policy vérifie que c'est bien SA commande
+        $this->authorize('view', $commande);
+
+        $commande->load(['restaurant', 'lignes.produit', 'livraison']);
+
+        return view('client.commandes.show', compact('commande'));
+    }
+
+    public function annuler(Commande $commande, Request $request)
+    {
+        // La policy vérifie :
+        // 1. Que c'est bien SA commande
+        // 2. Que la commande est annulable
+        $this->authorize('annuler', $commande);
+
+        app(\App\Services\OrderService::class)->annuler($commande, 'Annulation par le client');
+
+        return redirect()->route('client.commandes.index')
+            ->with('success', 'Commande annulée');
+    }
+}
+```
+
+### 7.3 Exemple : Utilisation dans les vues Blade
+
+```blade
+{{-- Dans une vue Blade --}}
+
+{{-- Vérifier une permission Spatie --}}
+@can('menu.creer')
+    <a href="{{ route('gerant.produits.create') }}" class="btn btn-primary">
+        Ajouter un produit
+    </a>
+@endcan
+
+{{-- Vérifier une policy --}}
+@can('update', $restaurant)
+    <a href="{{ route('gerant.restaurant.edit') }}" class="btn btn-secondary">
+        Modifier le restaurant
+    </a>
+@endcan
+
+{{-- Boucle avec filtrage --}}
+@foreach($commandes as $commande)
+    @can('view', $commande)
+        <div class="commande-card">
+            <h3>{{ $commande->numero }}</h3>
+            
+            @can('modifierStatut', $commande)
+                <button>Changer le statut</button>
+            @endcan
+        </div>
+    @endcan
+@endforeach
+
+{{-- Afficher seulement les actions autorisées --}}
+<div class="actions">
+    @can('annuler', $commande)
+        <form action="{{ route('client.commandes.annuler', $commande) }}" method="POST">
+            @csrf
+            <button type="submit" class="btn btn-danger">Annuler</button>
+        </form>
+    @endcan
+
+    @can('repondre', $commande->avis)
+        <button>Répondre à l'avis</button>
+    @endcan
+</div>
+```
+
+---
+
+## 🧪 8. TESTER LES AUTORISATIONS
+
+### 8.1 Commande Artisan pour vérifier les permissions
+
+Crée `app/Console/Commands/CheckUserPermissions.php` :
+
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use App\Models\Utilisateur;
+use Illuminate\Console\Command;
+
+class CheckUserPermissions extends Command
+{
+    protected $signature = 'permissions:check {email}';
+    protected $description = 'Affiche toutes les permissions d\'un utilisateur';
+
+    public function handle(): int
+    {
+        $email = $this->argument('email');
+        $user = Utilisateur::where('email', $email)->first();
+
+        if (!$user) {
+            $this->error("Utilisateur introuvable : {$email}");
+            return 1;
+        }
+
+        $this->info("👤 Utilisateur : {$user->prenom} {$user->nom}");
+        $this->info("🎭 Rôle : {$user->role->value}");
+        $this->info("📧 Email : {$user->email}");
+        $this->newLine();
+
+        $roles = $user->getRoleNames();
+        $this->info("🏷️  Rôles Spatie : " . ($roles->isEmpty() ? 'Aucun' : $roles->implode(', ')));
+        $this->newLine();
+
+        $permissions = $user->getAllPermissions();
+        $this->info("🔑 Permissions ({$permissions->count()}) :");
+        
+        foreach ($permissions->sortBy('nom') as $permission) {
+            $this->line("  • {$permission->nom}");
+        }
+
+        return 0;
+    }
+}
+```
+
+**Utilisation :**
+```bash
+php artisan permissions:check admin@restaurant-app.com
+```
+
+### 8.2 Commande pour lister toutes les permissions
+
+Crée `app/Console/Commands/ListPermissions.php` :
+
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use App\Models\Role;
+use App\Models\Permission;
+use Illuminate\Console\Command;
+
+class ListPermissions extends Command
+{
+    protected $signature = 'permissions:list';
+    protected $description = 'Liste toutes les permissions par rôle';
+
+    public function handle(): int
+    {
+        $roles = Role::with('permissions')->get();
+
+        foreach ($roles as $role) {
+            $this->info("🎭 Rôle : {$role->nom}");
+            $this->info("   Permissions : {$role->permissions->count()}");
+            
+            foreach ($role->permissions->sortBy('nom') as $permission) {
+                $this->line("   • {$permission->nom}");
+            }
+            $this->newLine();
+        }
+
+        return 0;
+    }
+}
+```
+
+---
+
+## 📋 9. AJOUT AU SEEDER PRINCIPAL
+
+Mets à jour `database/Seeders/DatabaseSeeder.php` :
+
+```php
+<?php
+
+namespace Database\Seeders;
+
+use Illuminate\Database\Seeder;
+
+class DatabaseSeeder extends Seeder
+{
+    public function run(): void
+    {
+        $this->command->info('🚀 Début du remplissage de la base de données...');
+
+        // 1. Rôles et permissions (EN PREMIER !)
+        $this->call([
+            RoleAndPermissionSeeder::class,
+            AllergeneSeeder::class,
+        ]);
+
+        // 2. Entités principales
+        $this->call([
+            RestaurantMenuSeeder::class,
+            UtilisateursEtClientsSeeder::class,
+        ]);
+
+        $this->command->info('✅ Base de données remplie avec succès !');
+        $this->command->info('📧 SuperAdmin: admin@restaurant-app.com | Mot de passe: Admin@12345');
+    }
+}
+```
+
+---
+
+## 🎁 10. TRAIT UTILE : `HasPermissions`
+
+Crée un trait pour faciliter l'accès aux permissions dans les vues :
+
+### `app/Traits/HasPermissionsHelper.php`
+
+```php
+<?php
+
+namespace App\Traits;
+
+trait HasPermissionsHelper
+{
+    /**
+     * Vérifie si l'utilisateur peut gérer le restaurant courant
+     */
+    public function peutGererRestaurant($restaurant = null): bool
+    {
+        if (!$restaurant) {
+            $restaurant = request()->route('restaurant');
+        }
+
+        if (!$restaurant) {
+            return false;
+        }
+
+        return auth()->user()->can('update', $restaurant);
+    }
+
+    /**
+     * Vérifie si l'utilisateur est le propriétaire de la ressource
+     */
+    public function estProprietaire($ressource): bool
+    {
+        $user = auth()->user();
+        
+        if (method_exists($ressource, 'client') && $ressource->client_id === $user->profilClient?->id) {
+            return true;
+        }
+        
+        if (method_exists($ressource, 'utilisateur') && $ressource->utilisateur_id === $user->id) {
+            return true;
+        }
+
+        return false;
+    }
+}
+```
+
