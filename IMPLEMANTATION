@@ -1,0 +1,1827 @@
+# 🗄️ SCHÉMA DE BASE DE DONNÉES COMPLET - LARAVEL RESTAURANT (UUID + FRANÇAIS)
+
+Voici le schéma complet avec **UUID partout** et **noms de champs en français**.
+
+> ⚠️ **Note importante** : Je garde `created_at`, `updated_at`, `deleted_at` en anglais car ce sont les noms standards de Laravel (timestamps). Tout le reste est en français.
+
+---
+
+## 📊 VUE D'ENSEMBLE
+
+**Total : 75 tables** organisées en 12 modules
+
+```
+📦 MODULES
+├── 1. Utilisateurs & Rôles (10 tables)
+├── 2. Restaurants (8 tables)
+├── 3. Menu & Produits (12 tables)
+├── 4. Commandes (8 tables)
+├── 5. Réservations (4 tables)
+├── 6. Livraison (6 tables)
+├── 7. Paiements (10 tables)
+├── 8. Marketing & Fidélité (8 tables)
+├── 9. Avis & Réputation (4 tables)
+├── 10. Notifications (3 tables)
+├── 11. Support (3 tables)
+└── 12. Système & Configuration (9 tables)
+```
+
+---
+
+## ⚙️ CONFIGURATION LARAVEL POUR UUID
+
+### Dans `config/database.php`
+```php
+// Pour MySQL 8+ avec UUID natif
+'connections' => [
+    'mysql' => [
+        'driver' => 'mysql',
+        // ...
+        'charset' => 'utf8mb4',
+        'collation' => 'utf8mb4_unicode_ci',
+    ],
+],
+```
+
+### Dans le modèle de base `app/Models/Model.php`
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
+
+abstract class BaseModel extends Model
+{
+    use HasUuids;
+
+    public $incrementing = false;
+    protected $keyType = 'string';
+}
+```
+
+---
+
+## 1️⃣ MODULE UTILISATEURS & RÔLES (10 tables)
+
+### 1.1 `utilisateurs`
+```sql
+CREATE TABLE utilisateurs (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    prenom VARCHAR(100) NOT NULL,
+    nom VARCHAR(100) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    email_verifie_le TIMESTAMP NULL,
+    telephone VARCHAR(20) NULL,
+    telephone_verifie_le TIMESTAMP NULL,
+    mot_de_passe VARCHAR(255) NOT NULL,
+    role ENUM('superadmin', 'admin', 'gerant', 'livreur', 'client') NOT NULL DEFAULT 'client',
+    avatar VARCHAR(255) NULL,
+    statut ENUM('actif', 'inactif', 'suspendu', 'banni') NOT NULL DEFAULT 'actif',
+    derniere_connexion_le TIMESTAMP NULL,
+    langue VARCHAR(10) NOT NULL DEFAULT 'fr',
+    fuseau_horaire VARCHAR(50) NOT NULL DEFAULT 'Africa/Abidjan',
+    deux_facteur_secret TEXT NULL,
+    deux_facteur_codes_recuperation TEXT NULL,
+    token_remember VARCHAR(100) NULL,
+    photo_profil_chemin VARCHAR(2048) NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    supprime_le TIMESTAMP NULL,
+    
+    INDEX idx_email (email),
+    INDEX idx_telephone (telephone),
+    INDEX idx_role (role),
+    INDEX idx_statut (statut)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 1.2 `profils_super_admin`
+```sql
+CREATE TABLE profils_super_admin (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    utilisateur_id CHAR(36) NOT NULL UNIQUE,
+    permissions JSON NULL COMMENT 'Permissions spécifiques',
+    notes TEXT NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (utilisateur_id) REFERENCES utilisateurs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 1.3 `profils_admin`
+```sql
+CREATE TABLE profils_admin (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    utilisateur_id CHAR(36) NOT NULL UNIQUE,
+    permissions JSON NULL,
+    notes TEXT NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (utilisateur_id) REFERENCES utilisateurs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 1.4 `profils_gerant`
+```sql
+CREATE TABLE profils_gerant (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    utilisateur_id CHAR(36) NOT NULL UNIQUE,
+    restaurant_id CHAR(36) NOT NULL,
+    salaire DECIMAL(10, 2) NULL,
+    date_embauche DATE NULL,
+    taux_commission DECIMAL(5, 2) NOT NULL DEFAULT 0.00,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (utilisateur_id) REFERENCES utilisateurs(id) ON DELETE CASCADE,
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+    INDEX idx_restaurant (restaurant_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 1.5 `profils_livreur`
+```sql
+CREATE TABLE profils_livreur (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    utilisateur_id CHAR(36) NOT NULL UNIQUE,
+    type_vehicule ENUM('velo', 'scooter', 'voiture', 'pied') NOT NULL DEFAULT 'velo',
+    immatriculation VARCHAR(20) NULL,
+    numero_permis VARCHAR(50) NULL,
+    note DECIMAL(3, 2) NOT NULL DEFAULT 5.00,
+    total_livraisons INT UNSIGNED NOT NULL DEFAULT 0,
+    zone_geojson JSON NULL COMMENT 'Zone de livraison préférée',
+    est_disponible BOOLEAN NOT NULL DEFAULT FALSE,
+    latitude_courante DECIMAL(10, 8) NULL,
+    longitude_courante DECIMAL(11, 8) NULL,
+    derniere_maj_localisation TIMESTAMP NULL,
+    rib_bancaire VARCHAR(255) NULL,
+    nom_banque VARCHAR(100) NULL,
+    titulaire_compte VARCHAR(255) NULL,
+    total_gains DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (utilisateur_id) REFERENCES utilisateurs(id) ON DELETE CASCADE,
+    INDEX idx_disponible (est_disponible),
+    INDEX idx_localisation (latitude_courante, longitude_courante)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 1.6 `profils_client`
+```sql
+CREATE TABLE profils_client (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    utilisateur_id CHAR(36) NOT NULL UNIQUE,
+    points_fidelite INT UNSIGNED NOT NULL DEFAULT 0,
+    total_depense DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    nombre_commandes INT UNSIGNED NOT NULL DEFAULT 0,
+    date_naissance DATE NULL,
+    preferences_alimentaires JSON NULL COMMENT 'Vegan, Halal, etc.',
+    adresse_par_defaut_id CHAR(36) NULL,
+    opt_in_newsletter BOOLEAN NOT NULL DEFAULT FALSE,
+    opt_in_sms BOOLEAN NOT NULL DEFAULT FALSE,
+    opt_in_push BOOLEAN NOT NULL DEFAULT TRUE,
+    code_parrainage VARCHAR(20) NULL UNIQUE,
+    parraine_par_id CHAR(36) NULL,
+    bonus_parrainage_reclame BOOLEAN NOT NULL DEFAULT FALSE,
+    derniere_commande_le TIMESTAMP NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (utilisateur_id) REFERENCES utilisateurs(id) ON DELETE CASCADE,
+    FOREIGN KEY (adresse_par_defaut_id) REFERENCES adresses(id) ON DELETE SET NULL,
+    FOREIGN KEY (parraine_par_id) REFERENCES profils_client(id) ON DELETE SET NULL,
+    INDEX idx_fidelite (points_fidelite),
+    INDEX idx_parrainage (code_parrainage)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 1.7 `adresses`
+```sql
+CREATE TABLE adresses (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    client_id CHAR(36) NOT NULL,
+    libelle VARCHAR(100) NULL COMMENT 'Maison, Bureau, etc.',
+    adresse_voie VARCHAR(255) NOT NULL,
+    appartement VARCHAR(100) NULL,
+    ville VARCHAR(100) NOT NULL,
+    region VARCHAR(100) NULL,
+    code_postal VARCHAR(20) NOT NULL,
+    pays VARCHAR(100) NOT NULL DEFAULT 'Côte d\'Ivoire',
+    latitude DECIMAL(10, 8) NULL,
+    longitude DECIMAL(11, 8) NULL,
+    instructions_livraison TEXT NULL,
+    est_par_defaut BOOLEAN NOT NULL DEFAULT FALSE,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (client_id) REFERENCES profils_client(id) ON DELETE CASCADE,
+    INDEX idx_client (client_id),
+    INDEX idx_defaut (est_par_defaut)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 1.8 `roles` (Spatie Permission)
+```sql
+CREATE TABLE roles (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    nom VARCHAR(255) NOT NULL,
+    guard_name VARCHAR(255) NOT NULL DEFAULT 'web',
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    UNIQUE KEY unique_role_guard (nom, guard_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 1.9 `permissions`
+```sql
+CREATE TABLE permissions (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    nom VARCHAR(255) NOT NULL,
+    guard_name VARCHAR(255) NOT NULL DEFAULT 'web',
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    UNIQUE KEY unique_permission_guard (nom, guard_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 1.10 Tables pivot Spatie
+```sql
+CREATE TABLE model_has_roles (
+    role_id CHAR(36) NOT NULL,
+    model_type VARCHAR(255) NOT NULL,
+    model_id CHAR(36) NOT NULL,
+    
+    PRIMARY KEY (role_id, model_id, model_type),
+    FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
+    INDEX idx_model (model_type, model_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE model_has_permissions (
+    permission_id CHAR(36) NOT NULL,
+    model_type VARCHAR(255) NOT NULL,
+    model_id CHAR(36) NOT NULL,
+    
+    PRIMARY KEY (permission_id, model_id, model_type),
+    FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE,
+    INDEX idx_model (model_type, model_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE role_has_permissions (
+    permission_id CHAR(36) NOT NULL,
+    role_id CHAR(36) NOT NULL,
+    
+    PRIMARY KEY (permission_id, role_id),
+    FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE,
+    FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+---
+
+## 2️⃣ MODULE RESTAURANTS (8 tables)
+
+### 2.1 `restaurants`
+```sql
+CREATE TABLE restaurants (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    nom JSON NOT NULL COMMENT 'Multi-langue: {"fr":"Nom","en":"Name"}',
+    slug VARCHAR(255) NOT NULL UNIQUE,
+    description JSON NULL,
+    logo VARCHAR(255) NULL,
+    image_couverture VARCHAR(255) NULL,
+    telephone VARCHAR(20) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    site_web VARCHAR(255) NULL,
+    adresse VARCHAR(255) NOT NULL,
+    ville VARCHAR(100) NOT NULL,
+    code_postal VARCHAR(20) NOT NULL,
+    pays VARCHAR(100) NOT NULL DEFAULT 'Côte d\'Ivoire',
+    latitude DECIMAL(10, 8) NOT NULL,
+    longitude DECIMAL(11, 8) NOT NULL,
+    fuseau_horaire VARCHAR(50) NOT NULL DEFAULT 'Africa/Abidjan',
+    devise VARCHAR(3) NOT NULL DEFAULT 'XOF',
+    taux_tva DECIMAL(5, 2) NOT NULL DEFAULT 18.00,
+    livraison_activee BOOLEAN NOT NULL DEFAULT TRUE,
+    retrait_active BOOLEAN NOT NULL DEFAULT TRUE,
+    sur_place_active BOOLEAN NOT NULL DEFAULT TRUE,
+    montant_minimum_commande DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    rayon_max_livraison INT UNSIGNED NOT NULL DEFAULT 10 COMMENT 'en km',
+    temps_preparation INT UNSIGNED NOT NULL DEFAULT 30 COMMENT 'en minutes',
+    note DECIMAL(3, 2) NOT NULL DEFAULT 0.00,
+    total_avis INT UNSIGNED NOT NULL DEFAULT 0,
+    est_en_avant BOOLEAN NOT NULL DEFAULT FALSE,
+    statut ENUM('actif', 'inactif', 'en_attente', 'suspendu') NOT NULL DEFAULT 'en_attente',
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    supprime_le TIMESTAMP NULL,
+    
+    INDEX idx_statut (statut),
+    INDEX idx_localisation (latitude, longitude),
+    INDEX idx_avant (est_en_avant)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 2.2 `horaires_restaurant`
+```sql
+CREATE TABLE horaires_restaurant (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    restaurant_id CHAR(36) NOT NULL,
+    jour_semaine TINYINT UNSIGNED NOT NULL COMMENT '0=Dimanche, 6=Samedi',
+    heure_ouverture TIME NOT NULL,
+    heure_fermeture TIME NOT NULL,
+    est_ferme BOOLEAN NOT NULL DEFAULT FALSE,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+    INDEX idx_restaurant_jour (restaurant_id, jour_semaine)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 2.3 `fermetures_speciales_restaurant`
+```sql
+CREATE TABLE fermetures_speciales_restaurant (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    restaurant_id CHAR(36) NOT NULL,
+    titre VARCHAR(255) NOT NULL,
+    raison TEXT NULL,
+    date_debut DATE NOT NULL,
+    date_fin DATE NOT NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+    INDEX idx_dates (date_debut, date_fin)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 2.4 `salles_restaurant`
+```sql
+CREATE TABLE salles_restaurant (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    restaurant_id CHAR(36) NOT NULL,
+    nom VARCHAR(100) NOT NULL,
+    description TEXT NULL,
+    capacite INT UNSIGNED NOT NULL,
+    est_privee BOOLEAN NOT NULL DEFAULT FALSE,
+    nb_invites_min INT UNSIGNED NULL COMMENT 'Pour privatisation',
+    nb_invites_max INT UNSIGNED NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 2.5 `tables_restaurant`
+```sql
+CREATE TABLE tables_restaurant (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    restaurant_id CHAR(36) NOT NULL,
+    salle_id CHAR(36) NULL,
+    numero_table VARCHAR(20) NOT NULL,
+    places INT UNSIGNED NOT NULL DEFAULT 2,
+    qr_code VARCHAR(255) NULL UNIQUE,
+    est_active BOOLEAN NOT NULL DEFAULT TRUE,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+    FOREIGN KEY (salle_id) REFERENCES salles_restaurant(id) ON DELETE SET NULL,
+    INDEX idx_restaurant (restaurant_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 2.6 `restaurant_admin` (pivot multi-restaurants pour admin)
+```sql
+CREATE TABLE restaurant_admin (
+    restaurant_id CHAR(36) NOT NULL,
+    admin_id CHAR(36) NOT NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    PRIMARY KEY (restaurant_id, admin_id),
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+    FOREIGN KEY (admin_id) REFERENCES profils_admin(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 2.7 `images_restaurant`
+```sql
+CREATE TABLE images_restaurant (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    restaurant_id CHAR(36) NOT NULL,
+    chemin_image VARCHAR(255) NOT NULL,
+    texte_alternatif JSON NULL,
+    ordre_tri INT UNSIGNED NOT NULL DEFAULT 0,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 2.8 `services_restaurant`
+```sql
+CREATE TABLE services_restaurant (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    restaurant_id CHAR(36) NOT NULL,
+    service VARCHAR(100) NOT NULL COMMENT 'WiFi, Parking, Terrasse, etc.',
+    icone VARCHAR(100) NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+---
+
+## 3️⃣ MODULE MENU & PRODUITS (12 tables)
+
+### 3.1 `categories`
+```sql
+CREATE TABLE categories (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    restaurant_id CHAR(36) NOT NULL,
+    nom JSON NOT NULL,
+    slug VARCHAR(255) NOT NULL,
+    description JSON NULL,
+    icone VARCHAR(100) NULL,
+    image VARCHAR(255) NULL,
+    ordre_tri INT UNSIGNED NOT NULL DEFAULT 0,
+    est_active BOOLEAN NOT NULL DEFAULT TRUE,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_slug_restaurant (restaurant_id, slug),
+    INDEX idx_tri (ordre_tri)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 3.2 `sous_categories`
+```sql
+CREATE TABLE sous_categories (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    categorie_id CHAR(36) NOT NULL,
+    nom JSON NOT NULL,
+    slug VARCHAR(255) NOT NULL,
+    description JSON NULL,
+    ordre_tri INT UNSIGNED NOT NULL DEFAULT 0,
+    est_active BOOLEAN NOT NULL DEFAULT TRUE,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (categorie_id) REFERENCES categories(id) ON DELETE CASCADE,
+    INDEX idx_tri (ordre_tri)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 3.3 `produits`
+```sql
+CREATE TABLE produits (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    categorie_id CHAR(36) NOT NULL,
+    sous_categorie_id CHAR(36) NULL,
+    nom JSON NOT NULL,
+    slug VARCHAR(255) NOT NULL,
+    description JSON NULL,
+    prix_base DECIMAL(10, 2) NOT NULL,
+    prix_promo DECIMAL(10, 2) NULL,
+    taux_tva DECIMAL(5, 2) NOT NULL DEFAULT 18.00,
+    sku VARCHAR(100) NULL,
+    code_barre VARCHAR(100) NULL,
+    calories INT UNSIGNED NULL,
+    temps_preparation INT UNSIGNED NULL COMMENT 'en minutes',
+    est_vegetarien BOOLEAN NOT NULL DEFAULT FALSE,
+    est_vegan BOOLEAN NOT NULL DEFAULT FALSE,
+    est_sans_gluten BOOLEAN NOT NULL DEFAULT FALSE,
+    est_halal BOOLEAN NOT NULL DEFAULT FALSE,
+    est_epice BOOLEAN NOT NULL DEFAULT FALSE,
+    est_en_avant BOOLEAN NOT NULL DEFAULT FALSE,
+    est_nouveau BOOLEAN NOT NULL DEFAULT FALSE,
+    est_disponible BOOLEAN NOT NULL DEFAULT TRUE,
+    quantite_stock INT UNSIGNED NULL COMMENT 'NULL = stock illimité',
+    ordre_tri INT UNSIGNED NOT NULL DEFAULT 0,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    supprime_le TIMESTAMP NULL,
+    
+    FOREIGN KEY (categorie_id) REFERENCES categories(id) ON DELETE CASCADE,
+    FOREIGN KEY (sous_categorie_id) REFERENCES sous_categories(id) ON DELETE SET NULL,
+    INDEX idx_categorie (categorie_id),
+    INDEX idx_disponible (est_disponible),
+    INDEX idx_avant (est_en_avant)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 3.4 `images_produit`
+```sql
+CREATE TABLE images_produit (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    produit_id CHAR(36) NOT NULL,
+    chemin_image VARCHAR(255) NOT NULL,
+    texte_alternatif JSON NULL,
+    est_principale BOOLEAN NOT NULL DEFAULT FALSE,
+    ordre_tri INT UNSIGNED NOT NULL DEFAULT 0,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (produit_id) REFERENCES produits(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 3.5 `variantes_produit`
+```sql
+CREATE TABLE variantes_produit (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    produit_id CHAR(36) NOT NULL,
+    nom JSON NOT NULL COMMENT 'Taille: S, M, L',
+    modificateur_prix DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    ordre_tri INT UNSIGNED NOT NULL DEFAULT 0,
+    est_active BOOLEAN NOT NULL DEFAULT TRUE,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (produit_id) REFERENCES produits(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 3.6 `supplements_produit`
+```sql
+CREATE TABLE supplements_produit (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    produit_id CHAR(36) NOT NULL,
+    nom JSON NOT NULL COMMENT 'Supplément: Fromage, Oeuf, etc.',
+    prix DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    est_obligatoire BOOLEAN NOT NULL DEFAULT FALSE,
+    nb_choix_max INT UNSIGNED NULL COMMENT 'Nombre max de choix',
+    ordre_tri INT UNSIGNED NOT NULL DEFAULT 0,
+    est_actif BOOLEAN NOT NULL DEFAULT TRUE,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (produit_id) REFERENCES produits(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 3.7 `allergenes`
+```sql
+CREATE TABLE allergenes (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    nom JSON NOT NULL,
+    icone VARCHAR(100) NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 3.8 `produit_allergenes`
+```sql
+CREATE TABLE produit_allergenes (
+    produit_id CHAR(36) NOT NULL,
+    allergene_id CHAR(36) NOT NULL,
+    
+    PRIMARY KEY (produit_id, allergene_id),
+    FOREIGN KEY (produit_id) REFERENCES produits(id) ON DELETE CASCADE,
+    FOREIGN KEY (allergene_id) REFERENCES allergenes(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 3.9 `produit_restaurant` (pivot pour prix par restaurant)
+```sql
+CREATE TABLE produit_restaurant (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    produit_id CHAR(36) NOT NULL,
+    restaurant_id CHAR(36) NOT NULL,
+    prix DECIMAL(10, 2) NOT NULL,
+    est_disponible BOOLEAN NOT NULL DEFAULT TRUE,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (produit_id) REFERENCES produits(id) ON DELETE CASCADE,
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_produit_restaurant (produit_id, restaurant_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 3.10 `menus_du_jour`
+```sql
+CREATE TABLE menus_du_jour (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    restaurant_id CHAR(36) NOT NULL,
+    date DATE NOT NULL,
+    titre JSON NULL,
+    description JSON NULL,
+    prix DECIMAL(10, 2) NULL,
+    est_actif BOOLEAN NOT NULL DEFAULT TRUE,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_date_restaurant (restaurant_id, date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 3.11 `menu_du_jour_produits`
+```sql
+CREATE TABLE menu_du_jour_produits (
+    menu_du_jour_id CHAR(36) NOT NULL,
+    produit_id CHAR(36) NOT NULL,
+    
+    PRIMARY KEY (menu_du_jour_id, produit_id),
+    FOREIGN KEY (menu_du_jour_id) REFERENCES menus_du_jour(id) ON DELETE CASCADE,
+    FOREIGN KEY (produit_id) REFERENCES produits(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 3.12 `tags_produit`
+```sql
+CREATE TABLE tags_produit (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    produit_id CHAR(36) NOT NULL,
+    tag VARCHAR(100) NOT NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (produit_id) REFERENCES produits(id) ON DELETE CASCADE,
+    INDEX idx_tag (tag)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+---
+
+## 4️⃣ MODULE COMMANDES (8 tables)
+
+### 4.1 `commandes`
+```sql
+CREATE TABLE commandes (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    numero VARCHAR(50) NOT NULL UNIQUE COMMENT 'Ex: CMD-20260729-0001',
+    client_id CHAR(36) NOT NULL,
+    restaurant_id CHAR(36) NOT NULL,
+    livreur_id CHAR(36) NULL,
+    adresse_livraison_id CHAR(36) NULL,
+    table_id CHAR(36) NULL COMMENT 'Pour commande sur place',
+    type_commande ENUM('livraison', 'retrait', 'sur_place') NOT NULL DEFAULT 'livraison',
+    statut ENUM('en_attente', 'confirmee', 'en_preparation', 'prete', 'en_livraison', 'livree', 'terminee', 'annulee', 'remboursee') NOT NULL DEFAULT 'en_attente',
+    sous_total DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    montant_tva DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    frais_livraison DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    montant_reduction DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    montant_total DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    montant_paye DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    code_promo_id CHAR(36) NULL,
+    notes_client TEXT NULL,
+    notes_restaurant TEXT NULL,
+    temps_preparation_estime INT UNSIGNED NULL COMMENT 'en minutes',
+    heure_livraison_prevue TIMESTAMP NULL,
+    heure_livraison_effective TIMESTAMP NULL,
+    est_notee BOOLEAN NOT NULL DEFAULT FALSE,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    supprime_le TIMESTAMP NULL,
+    
+    FOREIGN KEY (client_id) REFERENCES profils_client(id) ON DELETE RESTRICT,
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE RESTRICT,
+    FOREIGN KEY (livreur_id) REFERENCES profils_livreur(id) ON DELETE SET NULL,
+    FOREIGN KEY (adresse_livraison_id) REFERENCES adresses(id) ON DELETE SET NULL,
+    FOREIGN KEY (table_id) REFERENCES tables_restaurant(id) ON DELETE SET NULL,
+    FOREIGN KEY (code_promo_id) REFERENCES codes_promo(id) ON DELETE SET NULL,
+    INDEX idx_client (client_id),
+    INDEX idx_restaurant (restaurant_id),
+    INDEX idx_livreur (livreur_id),
+    INDEX idx_statut (statut),
+    INDEX idx_numero (numero)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 4.2 `lignes_commande`
+```sql
+CREATE TABLE lignes_commande (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    commande_id CHAR(36) NOT NULL,
+    produit_id CHAR(36) NOT NULL,
+    variante_id CHAR(36) NULL,
+    nom_produit JSON NOT NULL COMMENT 'Snapshot du nom au moment de la commande',
+    quantite INT UNSIGNED NOT NULL DEFAULT 1,
+    prix_unitaire DECIMAL(10, 2) NOT NULL,
+    modificateur_prix DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    prix_total_ligne DECIMAL(10, 2) NOT NULL,
+    notes TEXT NULL,
+    est_terminee BOOLEAN NOT NULL DEFAULT FALSE,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (commande_id) REFERENCES commandes(id) ON DELETE CASCADE,
+    FOREIGN KEY (produit_id) REFERENCES produits(id) ON DELETE RESTRICT,
+    FOREIGN KEY (variante_id) REFERENCES variantes_produit(id) ON DELETE SET NULL,
+    INDEX idx_commande (commande_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 4.3 `options_ligne_commande`
+```sql
+CREATE TABLE options_ligne_commande (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    ligne_commande_id CHAR(36) NOT NULL,
+    supplement_id CHAR(36) NOT NULL,
+    nom_supplement JSON NOT NULL,
+    prix DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (ligne_commande_id) REFERENCES lignes_commande(id) ON DELETE CASCADE,
+    FOREIGN KEY (supplement_id) REFERENCES supplements_produit(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 4.4 `historique_statuts_commande`
+```sql
+CREATE TABLE historique_statuts_commande (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    commande_id CHAR(36) NOT NULL,
+    statut VARCHAR(50) NOT NULL,
+    modifie_par_id CHAR(36) NULL,
+    commentaire TEXT NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (commande_id) REFERENCES commandes(id) ON DELETE CASCADE,
+    FOREIGN KEY (modifie_par_id) REFERENCES utilisateurs(id) ON DELETE SET NULL,
+    INDEX idx_commande (commande_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 4.5 `paniers`
+```sql
+CREATE TABLE paniers (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    client_id CHAR(36) NOT NULL,
+    restaurant_id CHAR(36) NOT NULL,
+    session_id VARCHAR(255) NULL,
+    sous_total DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    montant_total DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    code_promo_id CHAR(36) NULL,
+    derniere_activite_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (client_id) REFERENCES profils_client(id) ON DELETE CASCADE,
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+    FOREIGN KEY (code_promo_id) REFERENCES codes_promo(id) ON DELETE SET NULL,
+    INDEX idx_client (client_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 4.6 `panier_lignes`
+```sql
+CREATE TABLE panier_lignes (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    panier_id CHAR(36) NOT NULL,
+    produit_id CHAR(36) NOT NULL,
+    variante_id CHAR(36) NULL,
+    quantite INT UNSIGNED NOT NULL DEFAULT 1,
+    prix_unitaire DECIMAL(10, 2) NOT NULL,
+    options JSON NULL COMMENT 'Suppléments sélectionnés',
+    notes TEXT NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (panier_id) REFERENCES paniers(id) ON DELETE CASCADE,
+    FOREIGN KEY (produit_id) REFERENCES produits(id) ON DELETE CASCADE,
+    FOREIGN KEY (variante_id) REFERENCES variantes_produit(id) ON DELETE SET NULL,
+    INDEX idx_panier (panier_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 4.7 `favoris_client`
+```sql
+CREATE TABLE favoris_client (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    client_id CHAR(36) NOT NULL,
+    produit_id CHAR(36) NOT NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (client_id) REFERENCES profils_client(id) ON DELETE CASCADE,
+    FOREIGN KEY (produit_id) REFERENCES produits(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_client_produit (client_id, produit_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 4.8 `historique_paniers` (pour analytics)
+```sql
+CREATE TABLE historique_paniers (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    client_id CHAR(36) NULL,
+    restaurant_id CHAR(36) NOT NULL,
+    session_id VARCHAR(255) NULL,
+    action VARCHAR(50) NOT NULL COMMENT 'ajout, suppression, modification, abandon',
+    produit_id CHAR(36) NULL,
+    donnees JSON NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (client_id) REFERENCES profils_client(id) ON DELETE SET NULL,
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+    INDEX idx_client (client_id),
+    INDEX idx_action (action)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+---
+
+## 5️⃣ MODULE RÉSERVATIONS (4 tables)
+
+### 5.1 `reservations`
+```sql
+CREATE TABLE reservations (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    numero VARCHAR(50) NOT NULL UNIQUE,
+    client_id CHAR(36) NOT NULL,
+    restaurant_id CHAR(36) NOT NULL,
+    table_id CHAR(36) NULL,
+    salle_id CHAR(36) NULL,
+    date_reservation DATE NOT NULL,
+    heure_reservation TIME NOT NULL,
+    duree_minutes INT UNSIGNED NOT NULL DEFAULT 120,
+    nombre_personnes INT UNSIGNED NOT NULL,
+    statut ENUM('en_attente', 'confirmee', 'refusee', 'annulee', 'terminee', 'no_show') NOT NULL DEFAULT 'en_attente',
+    nom_client VARCHAR(255) NOT NULL,
+    telephone_client VARCHAR(20) NOT NULL,
+    email_client VARCHAR(255) NOT NULL,
+    occasion_speciale VARCHAR(100) NULL COMMENT 'Anniversaire, etc.',
+    notes TEXT NULL,
+    montant_depense DECIMAL(10, 2) NULL,
+    est_no_show BOOLEAN NOT NULL DEFAULT FALSE,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    supprime_le TIMESTAMP NULL,
+    
+    FOREIGN KEY (client_id) REFERENCES profils_client(id) ON DELETE RESTRICT,
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE RESTRICT,
+    FOREIGN KEY (table_id) REFERENCES tables_restaurant(id) ON DELETE SET NULL,
+    FOREIGN KEY (salle_id) REFERENCES salles_restaurant(id) ON DELETE SET NULL,
+    INDEX idx_client (client_id),
+    INDEX idx_restaurant_date (restaurant_id, date_reservation),
+    INDEX idx_statut (statut)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 5.2 `historique_statuts_reservation`
+```sql
+CREATE TABLE historique_statuts_reservation (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    reservation_id CHAR(36) NOT NULL,
+    statut VARCHAR(50) NOT NULL,
+    modifie_par_id CHAR(36) NULL,
+    commentaire TEXT NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (reservation_id) REFERENCES reservations(id) ON DELETE CASCADE,
+    FOREIGN KEY (modifie_par_id) REFERENCES utilisateurs(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 5.3 `listes_attente`
+```sql
+CREATE TABLE listes_attente (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    restaurant_id CHAR(36) NOT NULL,
+    client_id CHAR(36) NOT NULL,
+    nombre_personnes INT UNSIGNED NOT NULL,
+    date_souhaitee DATE NOT NULL,
+    heure_souhaitee TIME NOT NULL,
+    position INT UNSIGNED NOT NULL,
+    statut ENUM('en_attente', 'appele', 'assi', 'annule') NOT NULL DEFAULT 'en_attente',
+    telephone VARCHAR(20) NOT NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+    FOREIGN KEY (client_id) REFERENCES profils_client(id) ON DELETE CASCADE,
+    INDEX idx_restaurant_statut (restaurant_id, statut)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 5.4 `privatisations`
+```sql
+CREATE TABLE privatisations (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    restaurant_id CHAR(36) NOT NULL,
+    salle_id CHAR(36) NULL,
+    client_id CHAR(36) NULL,
+    nom_organisateur VARCHAR(255) NOT NULL,
+    email_organisateur VARCHAR(255) NOT NULL,
+    telephone_organisateur VARCHAR(20) NOT NULL,
+    type_evenement VARCHAR(100) NOT NULL COMMENT 'Mariage, Anniversaire, Entreprise',
+    date_debut DATETIME NOT NULL,
+    date_fin DATETIME NOT NULL,
+    nombre_invites INT UNSIGNED NOT NULL,
+    budget_estime DECIMAL(10, 2) NULL,
+    statut ENUM('demande', 'devis_envoye', 'accepte', 'refuse', 'annule', 'termine') NOT NULL DEFAULT 'demande',
+    message TEXT NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+    FOREIGN KEY (salle_id) REFERENCES salles_restaurant(id) ON DELETE SET NULL,
+    FOREIGN KEY (client_id) REFERENCES profils_client(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+---
+
+## 6️⃣ MODULE LIVRAISON (6 tables)
+
+### 6.1 `zones_livraison`
+```sql
+CREATE TABLE zones_livraison (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    restaurant_id CHAR(36) NOT NULL,
+    nom VARCHAR(100) NOT NULL,
+    polygone_geojson JSON NOT NULL COMMENT 'Zone géographique',
+    frais_livraison DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    temps_livraison_estime INT UNSIGNED NOT NULL DEFAULT 30 COMMENT 'en minutes',
+    est_active BOOLEAN NOT NULL DEFAULT TRUE,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+    INDEX idx_restaurant (restaurant_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 6.2 `livraisons`
+```sql
+CREATE TABLE livraisons (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    commande_id CHAR(36) NOT NULL UNIQUE,
+    livreur_id CHAR(36) NULL,
+    zone_id CHAR(36) NULL,
+    statut ENUM('en_attente_livreur', 'assignee', 'en_route_restaurant', 'recuperee', 'en_livraison', 'livree', 'echouee') NOT NULL DEFAULT 'en_attente_livreur',
+    distance_km DECIMAL(6, 2) NULL,
+    duree_estimee INT UNSIGNED NULL COMMENT 'en minutes',
+    heure_prise_en_charge TIMESTAMP NULL,
+    heure_livraison TIMESTAMP NULL,
+    pourboire DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    commission_livreur DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (commande_id) REFERENCES commandes(id) ON DELETE CASCADE,
+    FOREIGN KEY (livreur_id) REFERENCES profils_livreur(id) ON DELETE SET NULL,
+    FOREIGN KEY (zone_id) REFERENCES zones_livraison(id) ON DELETE SET NULL,
+    INDEX idx_livreur (livreur_id),
+    INDEX idx_statut (statut)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 6.3 `suivis_livraison`
+```sql
+CREATE TABLE suivis_livraison (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    livraison_id CHAR(36) NOT NULL,
+    livreur_id CHAR(36) NOT NULL,
+    latitude DECIMAL(10, 8) NOT NULL,
+    longitude DECIMAL(11, 8) NOT NULL,
+    vitesse DECIMAL(5, 2) NULL,
+    direction DECIMAL(5, 2) NULL,
+    precision_m DECIMAL(5, 2) NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (livraison_id) REFERENCES livraisons(id) ON DELETE CASCADE,
+    FOREIGN KEY (livreur_id) REFERENCES profils_livreur(id) ON DELETE CASCADE,
+    INDEX idx_livraison (livraison_id),
+    INDEX idx_cree_le (cree_le)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 6.4 `preuves_livraison`
+```sql
+CREATE TABLE preuves_livraison (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    livraison_id CHAR(36) NOT NULL UNIQUE,
+    type_preuve ENUM('photo', 'signature', 'code', 'gps') NOT NULL,
+    chemin_fichier VARCHAR(255) NULL,
+    signature_base64 LONGTEXT NULL,
+    code_confirmation VARCHAR(10) NULL,
+    nom_destinataire VARCHAR(255) NULL,
+    latitude DECIMAL(10, 8) NULL,
+    longitude DECIMAL(11, 8) NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (livraison_id) REFERENCES livraisons(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 6.5 `evaluations_livreur`
+```sql
+CREATE TABLE evaluations_livreur (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    livraison_id CHAR(36) NOT NULL UNIQUE,
+    client_id CHAR(36) NOT NULL,
+    livreur_id CHAR(36) NOT NULL,
+    note TINYINT UNSIGNED NOT NULL COMMENT '1 à 5',
+    commentaire TEXT NULL,
+    ponctualite TINYINT UNSIGNED NULL,
+    politesse TINYINT UNSIGNED NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (livraison_id) REFERENCES livraisons(id) ON DELETE CASCADE,
+    FOREIGN KEY (client_id) REFERENCES profils_client(id) ON DELETE CASCADE,
+    FOREIGN KEY (livreur_id) REFERENCES profils_livreur(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_livraison (livraison_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 6.6 `planning_livreurs`
+```sql
+CREATE TABLE planning_livreurs (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    livreur_id CHAR(36) NOT NULL,
+    date DATE NOT NULL,
+    heure_debut TIME NOT NULL,
+    heure_fin TIME NOT NULL,
+    statut ENUM('prevu', 'effectue', 'absent') NOT NULL DEFAULT 'prevu',
+    notes TEXT NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (livreur_id) REFERENCES profils_livreur(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_livreur_date (livreur_id, date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+---
+
+## 7️⃣ MODULE PAIEMENTS (10 tables)
+
+### 7.1 `paiements`
+```sql
+CREATE TABLE paiements (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    commande_id CHAR(36) NOT NULL,
+    client_id CHAR(36) NOT NULL,
+    reference_transaction VARCHAR(255) NOT NULL UNIQUE,
+    reference_prestataire VARCHAR(255) NULL COMMENT 'ID chez Stripe, MTN, etc.',
+    methode_paiement ENUM('carte_bancaire', 'mtn_mobile_money', 'moov_money', 'orange_money', 'wave', 'paypal', 'payeer', 'payoneer', 'portefeuille', 'carte_cadeau', 'especes_livraison', 'virement') NOT NULL,
+    prestataire VARCHAR(50) NOT NULL COMMENT 'stripe, mtn, moov, paypal, etc.',
+    montant DECIMAL(10, 2) NOT NULL,
+    devise VARCHAR(3) NOT NULL DEFAULT 'XOF',
+    statut ENUM('en_attente', 'reussi', 'echoue', 'annule', 'rembourse_partiellement', 'rembourse') NOT NULL DEFAULT 'en_attente',
+    telephone_mobile_money VARCHAR(20) NULL COMMENT 'Pour MTN/Moov',
+    email_paypal VARCHAR(255) NULL,
+    metadata JSON NULL,
+    heure_paiement TIMESTAMP NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (commande_id) REFERENCES commandes(id) ON DELETE RESTRICT,
+    FOREIGN KEY (client_id) REFERENCES profils_client(id) ON DELETE RESTRICT,
+    INDEX idx_commande (commande_id),
+    INDEX idx_client (client_id),
+    INDEX idx_statut (statut),
+    INDEX idx_reference (reference_transaction)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 7.2 `transactions_paiement`
+```sql
+CREATE TABLE transactions_paiement (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    paiement_id CHAR(36) NOT NULL,
+    type_transaction ENUM('autorisation', 'capture', 'remboursement', 'webhook') NOT NULL,
+    montant DECIMAL(10, 2) NOT NULL,
+    statut VARCHAR(50) NOT NULL,
+    donnees_requete JSON NULL,
+    donnees_reponse JSON NULL,
+    code_erreur VARCHAR(50) NULL,
+    message_erreur TEXT NULL,
+    adresse_ip VARCHAR(45) NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (paiement_id) REFERENCES paiements(id) ON DELETE CASCADE,
+    INDEX idx_paiement (paiement_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 7.3 `remboursements`
+```sql
+CREATE TABLE remboursements (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    paiement_id CHAR(36) NOT NULL,
+    commande_id CHAR(36) NOT NULL,
+    montant DECIMAL(10, 2) NOT NULL,
+    raison TEXT NULL,
+    statut ENUM('demande', 'en_cours', 'effectue', 'refuse') NOT NULL DEFAULT 'demande',
+    reference_prestataire VARCHAR(255) NULL,
+    traite_par_id CHAR(36) NULL,
+    heure_traitement TIMESTAMP NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (paiement_id) REFERENCES paiements(id) ON DELETE RESTRICT,
+    FOREIGN KEY (commande_id) REFERENCES commandes(id) ON DELETE RESTRICT,
+    FOREIGN KEY (traite_par_id) REFERENCES utilisateurs(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 7.4 `cartes_cadeau`
+```sql
+CREATE TABLE cartes_cadeau (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    code VARCHAR(50) NOT NULL UNIQUE,
+    restaurant_id CHAR(36) NULL COMMENT 'NULL = valable tous restaurants',
+    acheteur_id CHAR(36) NULL,
+    beneficiaire_id CHAR(36) NULL,
+    montant_initial DECIMAL(10, 2) NOT NULL,
+    montant_restant DECIMAL(10, 2) NOT NULL,
+    devise VARCHAR(3) NOT NULL DEFAULT 'XOF',
+    statut ENUM('active', 'epuisee', 'expiree', 'desactivee') NOT NULL DEFAULT 'active',
+    message_personnalise TEXT NULL,
+    date_expiration DATE NULL,
+    heure_activation TIMESTAMP NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE SET NULL,
+    FOREIGN KEY (acheteur_id) REFERENCES profils_client(id) ON DELETE SET NULL,
+    FOREIGN KEY (beneficiaire_id) REFERENCES profils_client(id) ON DELETE SET NULL,
+    INDEX idx_code (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 7.5 `transactions_carte_cadeau`
+```sql
+CREATE TABLE transactions_carte_cadeau (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    carte_cadeau_id CHAR(36) NOT NULL,
+    commande_id CHAR(36) NULL,
+    type_transaction ENUM('achat', 'utilisation', 'rechargement', 'annulation') NOT NULL,
+    montant DECIMAL(10, 2) NOT NULL,
+    solde_apres DECIMAL(10, 2) NOT NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (carte_cadeau_id) REFERENCES cartes_cadeau(id) ON DELETE CASCADE,
+    FOREIGN KEY (commande_id) REFERENCES commandes(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 7.6 `portefeuilles`
+```sql
+CREATE TABLE portefeuilles (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    client_id CHAR(36) NOT NULL UNIQUE,
+    solde DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    devise VARCHAR(3) NOT NULL DEFAULT 'XOF',
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (client_id) REFERENCES profils_client(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 7.7 `transactions_portefeuille`
+```sql
+CREATE TABLE transactions_portefeuille (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    portefeuille_id CHAR(36) NOT NULL,
+    commande_id CHAR(36) NULL,
+    type_transaction ENUM('credit', 'debit', 'remboursement', 'bonus', 'ajustement') NOT NULL,
+    montant DECIMAL(10, 2) NOT NULL,
+    solde_avant DECIMAL(12, 2) NOT NULL,
+    solde_apres DECIMAL(12, 2) NOT NULL,
+    description TEXT NULL,
+    reference VARCHAR(255) NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (portefeuille_id) REFERENCES portefeuilles(id) ON DELETE CASCADE,
+    FOREIGN KEY (commande_id) REFERENCES commandes(id) ON DELETE SET NULL,
+    INDEX idx_portefeuille (portefeuille_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 7.8 `factures`
+```sql
+CREATE TABLE factures (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    numero VARCHAR(50) NOT NULL UNIQUE COMMENT 'FAC-2026-0001',
+    commande_id CHAR(36) NOT NULL,
+    client_id CHAR(36) NOT NULL,
+    restaurant_id CHAR(36) NOT NULL,
+    montant_ht DECIMAL(10, 2) NOT NULL,
+    montant_tva DECIMAL(10, 2) NOT NULL,
+    montant_ttc DECIMAL(10, 2) NOT NULL,
+    taux_tva DECIMAL(5, 2) NOT NULL,
+    chemin_pdf VARCHAR(255) NULL,
+    statut ENUM('brouillon', 'emise', 'payee', 'annulee') NOT NULL DEFAULT 'emise',
+    date_emission DATE NOT NULL,
+    date_echeance DATE NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (commande_id) REFERENCES commandes(id) ON DELETE RESTRICT,
+    FOREIGN KEY (client_id) REFERENCES profils_client(id) ON DELETE RESTRICT,
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE RESTRICT,
+    INDEX idx_numero (numero)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 7.9 `configurations_paiement`
+```sql
+CREATE TABLE configurations_paiement (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    restaurant_id CHAR(36) NOT NULL,
+    prestataire VARCHAR(50) NOT NULL COMMENT 'stripe, mtn, moov, paypal, payeer, payoneer',
+    est_active BOOLEAN NOT NULL DEFAULT FALSE,
+    cles_api JSON NOT NULL COMMENT 'Clés encryptées',
+    parametres JSON NULL,
+    webhook_secret VARCHAR(255) NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_restaurant_prestataire (restaurant_id, prestataire)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 7.10 `reversments_gérants`
+```sql
+CREATE TABLE reversements_gerants (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    restaurant_id CHAR(36) NOT NULL,
+    gerant_id CHAR(36) NOT NULL,
+    periode_debut DATE NOT NULL,
+    periode_fin DATE NOT NULL,
+    montant_brut DECIMAL(12, 2) NOT NULL,
+    commission_plateforme DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    montant_net DECIMAL(12, 2) NOT NULL,
+    statut ENUM('en_cours', 'valide', 'paye') NOT NULL DEFAULT 'en_cours',
+    date_paiement DATE NULL,
+    reference_paiement VARCHAR(255) NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE RESTRICT,
+    FOREIGN KEY (gerant_id) REFERENCES profils_gerant(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+---
+
+## 8️⃣ MODULE MARKETING & FIDÉLITÉ (8 tables)
+
+### 8.1 `codes_promo`
+```sql
+CREATE TABLE codes_promo (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    code VARCHAR(50) NOT NULL UNIQUE,
+    restaurant_id CHAR(36) NULL COMMENT 'NULL = tous restaurants',
+    titre VARCHAR(255) NOT NULL,
+    description TEXT NULL,
+    type_reduction ENUM('pourcentage', 'montant_fixe', 'livraison_gratuite') NOT NULL,
+    valeur_reduction DECIMAL(10, 2) NOT NULL,
+    montant_minimum DECIMAL(10, 2) NULL,
+    montant_maximum_reduction DECIMAL(10, 2) NULL,
+    utilisation_max INT UNSIGNED NULL COMMENT 'NULL = illimité',
+    utilisation_par_client INT UNSIGNED NOT NULL DEFAULT 1,
+    date_debut DATETIME NOT NULL,
+    date_fin DATETIME NULL,
+    est_actif BOOLEAN NOT NULL DEFAULT TRUE,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+    INDEX idx_code (code),
+    INDEX idx_actif (est_actif)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 8.2 `utilisations_code_promo`
+```sql
+CREATE TABLE utilisations_code_promo (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    code_promo_id CHAR(36) NOT NULL,
+    commande_id CHAR(36) NOT NULL,
+    client_id CHAR(36) NOT NULL,
+    montant_reduction DECIMAL(10, 2) NOT NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (code_promo_id) REFERENCES codes_promo(id) ON DELETE CASCADE,
+    FOREIGN KEY (commande_id) REFERENCES commandes(id) ON DELETE CASCADE,
+    FOREIGN KEY (client_id) REFERENCES profils_client(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_commande (commande_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 8.3 `transactions_fidelite`
+```sql
+CREATE TABLE transactions_fidelite (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    client_id CHAR(36) NOT NULL,
+    commande_id CHAR(36) NULL,
+    type_transaction ENUM('gain', 'utilisation', 'expiration', 'ajustement', 'bonus_parrainage') NOT NULL,
+    nombre_points INT NOT NULL,
+    solde_avant INT NOT NULL,
+    solde_apres INT NOT NULL,
+    description TEXT NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (client_id) REFERENCES profils_client(id) ON DELETE CASCADE,
+    FOREIGN KEY (commande_id) REFERENCES commandes(id) ON DELETE SET NULL,
+    INDEX idx_client (client_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 8.4 `niveaux_fidelite`
+```sql
+CREATE TABLE niveaux_fidelite (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    nom VARCHAR(100) NOT NULL,
+    points_minimum INT UNSIGNED NOT NULL,
+    avantages JSON NULL,
+    couleur VARCHAR(20) NULL,
+    icone VARCHAR(100) NULL,
+    ordre_tri INT UNSIGNED NOT NULL DEFAULT 0,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    INDEX idx_points (points_minimum)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 8.5 `parrainages`
+```sql
+CREATE TABLE parrainages (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    parrain_id CHAR(36) NOT NULL,
+    filleul_id CHAR(36) NOT NULL,
+    code_utilise VARCHAR(20) NOT NULL,
+    bonus_parrain INT UNSIGNED NOT NULL DEFAULT 0,
+    bonus_filleul INT UNSIGNED NOT NULL DEFAULT 0,
+    statut ENUM('en_attente', 'valide', 'annule') NOT NULL DEFAULT 'en_attente',
+    date_validation TIMESTAMP NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (parrain_id) REFERENCES profils_client(id) ON DELETE CASCADE,
+    FOREIGN KEY (filleul_id) REFERENCES profils_client(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_filleul (filleul_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 8.6 `campagnes_marketing`
+```sql
+CREATE TABLE campagnes_marketing (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    nom VARCHAR(255) NOT NULL,
+    type_campagne ENUM('email', 'sms', 'push', 'multi_canal') NOT NULL,
+    restaurant_id CHAR(36) NULL COMMENT 'NULL = toutes',
+    sujet VARCHAR(255) NULL,
+    contenu JSON NOT NULL COMMENT 'Multi-langue',
+    cibles JSON NULL COMMENT 'Critères de ciblage',
+    date_envoi_planifiee DATETIME NULL,
+    date_envoi_effective DATETIME NULL,
+    statut ENUM('brouillon', 'planifiee', 'envoyee', 'annulee') NOT NULL DEFAULT 'brouillon',
+    nb_destinataires INT UNSIGNED NOT NULL DEFAULT 0,
+    nb_ouverts INT UNSIGNED NOT NULL DEFAULT 0,
+    nb_cliques INT UNSIGNED NOT NULL DEFAULT 0,
+    nb_conversions INT UNSIGNED NOT NULL DEFAULT 0,
+    cree_par_id CHAR(36) NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE SET NULL,
+    FOREIGN KEY (cree_par_id) REFERENCES utilisateurs(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 8.7 `abonnes_newsletter`
+```sql
+CREATE TABLE abonnes_newsletter (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    client_id CHAR(36) NULL,
+    restaurant_id CHAR(36) NULL COMMENT 'NULL = toutes',
+    statut ENUM('actif', 'desabonne', 'en_attente_confirmation') NOT NULL DEFAULT 'en_attente_confirmation',
+    token_confirmation VARCHAR(255) NULL,
+    langue VARCHAR(10) NOT NULL DEFAULT 'fr',
+    date_confirmation TIMESTAMP NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (client_id) REFERENCES profils_client(id) ON DELETE SET NULL,
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE SET NULL,
+    INDEX idx_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 8.8 `bannieres_promotionnelles`
+```sql
+CREATE TABLE bannieres_promotionnelles (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    restaurant_id CHAR(36) NULL,
+    titre JSON NOT NULL,
+    sous_titre JSON NULL,
+    image VARCHAR(255) NOT NULL,
+    lien VARCHAR(255) NULL,
+    position ENUM('accueil', 'menu', 'commande', 'partout') NOT NULL DEFAULT 'accueil',
+    date_debut DATETIME NOT NULL,
+    date_fin DATETIME NULL,
+    est_active BOOLEAN NOT NULL DEFAULT TRUE,
+    ordre_tri INT UNSIGNED NOT NULL DEFAULT 0,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+---
+
+## 9️⃣ MODULE AVIS & RÉPUTATION (4 tables)
+
+### 9.1 `avis`
+```sql
+CREATE TABLE avis (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    commande_id CHAR(36) NOT NULL UNIQUE,
+    client_id CHAR(36) NOT NULL,
+    restaurant_id CHAR(36) NOT NULL,
+    livreur_id CHAR(36) NULL,
+    note_globale TINYINT UNSIGNED NOT NULL COMMENT '1 à 5',
+    note_qualite TINYINT UNSIGNED NULL,
+    note_service TINYINT UNSIGNED NULL,
+    note rapidite TINYINT UNSIGNED NULL,
+    commentaire TEXT NULL,
+    est_visible BOOLEAN NOT NULL DEFAULT TRUE,
+    est_modere BOOLEAN NOT NULL DEFAULT FALSE,
+    reponse_restaurant TEXT NULL,
+    reponse_le TIMESTAMP NULL,
+    repondu_par_id CHAR(36) NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (commande_id) REFERENCES commandes(id) ON DELETE CASCADE,
+    FOREIGN KEY (client_id) REFERENCES profils_client(id) ON DELETE CASCADE,
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+    FOREIGN KEY (livreur_id) REFERENCES profils_livreur(id) ON DELETE SET NULL,
+    FOREIGN KEY (repondu_par_id) REFERENCES utilisateurs(id) ON DELETE SET NULL,
+    INDEX idx_restaurant (restaurant_id),
+    INDEX idx_client (client_id),
+    INDEX idx_visible (est_visible)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 9.2 `photos_avis`
+```sql
+CREATE TABLE photos_avis (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    avis_id CHAR(36) NOT NULL,
+    chemin_image VARCHAR(255) NOT NULL,
+    ordre_tri INT UNSIGNED NOT NULL DEFAULT 0,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (avis_id) REFERENCES avis(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 9.3 `signalements_avis`
+```sql
+CREATE TABLE signalements_avis (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    avis_id CHAR(36) NOT NULL,
+    signale_par_id CHAR(36) NOT NULL,
+    motif VARCHAR(100) NOT NULL COMMENT 'spam, injure, faux, etc.',
+    details TEXT NULL,
+    statut ENUM('en_attente', 'traite', 'rejete') NOT NULL DEFAULT 'en_attente',
+    traite_par_id CHAR(36) NULL,
+    traitement_le TIMESTAMP NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (avis_id) REFERENCES avis(id) ON DELETE CASCADE,
+    FOREIGN KEY (signale_par_id) REFERENCES utilisateurs(id) ON DELETE CASCADE,
+    FOREIGN KEY (traite_par_id) REFERENCES utilisateurs(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 9.4 `reponses_avis`
+```sql
+CREATE TABLE reponses_avis (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    avis_id CHAR(36) NOT NULL UNIQUE,
+    repondu_par_id CHAR(36) NOT NULL,
+    contenu TEXT NOT NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (avis_id) REFERENCES avis(id) ON DELETE CASCADE,
+    FOREIGN KEY (repondu_par_id) REFERENCES utilisateurs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+---
+
+## 🔟 MODULE NOTIFICATIONS (3 tables)
+
+### 10.1 `notifications`
+```sql
+CREATE TABLE notifications (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    utilisateur_id CHAR(36) NOT NULL,
+    type VARCHAR(100) NOT NULL COMMENT 'commande_statut, reservation, promo, etc.',
+    titre JSON NOT NULL,
+    message JSON NOT NULL,
+    donnees JSON NULL,
+    canal ENUM('email', 'sms', 'push', 'in_app', 'whatsapp') NOT NULL,
+    est_lue BOOLEAN NOT NULL DEFAULT FALSE,
+    date_lecture TIMESTAMP NULL,
+    lien_action VARCHAR(255) NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (utilisateur_id) REFERENCES utilisateurs(id) ON DELETE CASCADE,
+    INDEX idx_utilisateur_lue (utilisateur_id, est_lue),
+    INDEX idx_type (type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 10.2 `preferences_notifications`
+```sql
+CREATE TABLE preferences_notifications (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    utilisateur_id CHAR(36) NOT NULL,
+    type_notification VARCHAR(100) NOT NULL,
+    canal ENUM('email', 'sms', 'push', 'in_app', 'whatsapp') NOT NULL,
+    est_active BOOLEAN NOT NULL DEFAULT TRUE,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (utilisateur_id) REFERENCES utilisateurs(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_utilisateur_type_canal (utilisateur_id, type_notification, canal)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 10.3 `tokens_push`
+```sql
+CREATE TABLE tokens_push (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    utilisateur_id CHAR(36) NOT NULL,
+    token TEXT NOT NULL,
+    plateforme ENUM('web', 'android', 'ios') NOT NULL,
+    est_actif BOOLEAN NOT NULL DEFAULT TRUE,
+    derniere_utilisation TIMESTAMP NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (utilisateur_id) REFERENCES utilisateurs(id) ON DELETE CASCADE,
+    INDEX idx_utilisateur (utilisateur_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+---
+
+## 1️⃣1️⃣ MODULE SUPPORT (3 tables)
+
+### 11.1 `tickets_support`
+```sql
+CREATE TABLE tickets_support (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    numero VARCHAR(50) NOT NULL UNIQUE,
+    client_id CHAR(36) NULL,
+    restaurant_id CHAR(36) NULL,
+    assigne_a_id CHAR(36) NULL,
+    categorie VARCHAR(100) NOT NULL COMMENT 'commande, paiement, compte, autre',
+    sujet VARCHAR(255) NOT NULL,
+    priorite ENUM('basse', 'normale', 'haute', 'urgente') NOT NULL DEFAULT 'normale',
+    statut ENUM('ouvert', 'en_cours', 'en_attente_client', 'resolu', 'ferme') NOT NULL DEFAULT 'ouvert',
+    canal_origine ENUM('web', 'email', 'telephone', 'reseau_social') NOT NULL DEFAULT 'web',
+    date_resolution TIMESTAMP NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (client_id) REFERENCES profils_client(id) ON DELETE SET NULL,
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE SET NULL,
+    FOREIGN KEY (assigne_a_id) REFERENCES utilisateurs(id) ON DELETE SET NULL,
+    INDEX idx_statut (statut),
+    INDEX idx_assigne (assigne_a_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 11.2 `messages_ticket`
+```sql
+CREATE TABLE messages_ticket (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    ticket_id CHAR(36) NOT NULL,
+    expediteur_id CHAR(36) NOT NULL,
+    type_expediteur ENUM('client', 'support', 'systeme') NOT NULL,
+    contenu TEXT NOT NULL,
+    est_prive BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'Note interne',
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (ticket_id) REFERENCES tickets_support(id) ON DELETE CASCADE,
+    FOREIGN KEY (expediteur_id) REFERENCES utilisateurs(id) ON DELETE CASCADE,
+    INDEX idx_ticket (ticket_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 11.3 `pieces_jointes_ticket`
+```sql
+CREATE TABLE pieces_jointes_ticket (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    message_id CHAR(36) NOT NULL,
+    nom_fichier VARCHAR(255) NOT NULL,
+    chemin_fichier VARCHAR(255) NOT NULL,
+    taille_octets INT UNSIGNED NOT NULL,
+    type_mime VARCHAR(100) NOT NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (message_id) REFERENCES messages_ticket(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+---
+
+## 1️⃣2️⃣ MODULE SYSTÈME & CONFIGURATION (9 tables)
+
+### 12.1 `journaux_audit`
+```sql
+CREATE TABLE journaux_audit (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    utilisateur_id CHAR(36) NULL,
+    action VARCHAR(100) NOT NULL COMMENT 'create, update, delete, login, etc.',
+    entite_type VARCHAR(100) NOT NULL COMMENT 'commande, produit, etc.',
+    entite_id CHAR(36) NULL,
+    anciennes_valeurs JSON NULL,
+    nouvelles_valeurs JSON NULL,
+    adresse_ip VARCHAR(45) NULL,
+    user_agent TEXT NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (utilisateur_id) REFERENCES utilisateurs(id) ON DELETE SET NULL,
+    INDEX idx_utilisateur (utilisateur_id),
+    INDEX idx_entite (entite_type, entite_id),
+    INDEX idx_action (action),
+    INDEX idx_date (cree_le)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 12.2 `parametres`
+```sql
+CREATE TABLE parametres (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    restaurant_id CHAR(36) NULL COMMENT 'NULL = global',
+    cle VARCHAR(255) NOT NULL,
+    valeur JSON NOT NULL,
+    type_valeur ENUM('string', 'number', 'boolean', 'json') NOT NULL DEFAULT 'string',
+    description TEXT NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_restaurant_cle (restaurant_id, cle)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 12.3 `traductions`
+```sql
+CREATE TABLE traductions (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    groupe VARCHAR(100) NOT NULL,
+    cle VARCHAR(255) NOT NULL,
+    langue VARCHAR(10) NOT NULL,
+    valeur TEXT NOT NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    UNIQUE KEY unique_groupe_cle_langue (groupe, cle, langue),
+    INDEX idx_langue (langue)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 12.4 `medias` (Spatie Media Library)
+```sql
+CREATE TABLE medias (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    model_type VARCHAR(255) NOT NULL,
+    model_id CHAR(36) NOT NULL,
+    uuid CHAR(36) NULL UNIQUE,
+    collection_name VARCHAR(255) NOT NULL,
+    nom_fichier VARCHAR(255) NOT NULL,
+    mime_type VARCHAR(255) NULL,
+    disque VARCHAR(255) NOT NULL,
+    taille_octets INT UNSIGNED NOT NULL,
+    manipulations JSON NULL,
+    custom_properties JSON NULL,
+    generated_conversions JSON NULL,
+    responsive_images JSON NULL,
+    ordre_tri INT UNSIGNED NOT NULL DEFAULT 0,
+    nombre_downloads INT UNSIGNED NOT NULL DEFAULT 0,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX idx_model (model_type, model_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 12.5 `taches_planifiees`
+```sql
+CREATE TABLE taches_planifiees (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    nom VARCHAR(255) NOT NULL,
+    commande VARCHAR(255) NOT NULL,
+    expression_cron VARCHAR(100) NOT NULL,
+    est_active BOOLEAN NOT NULL DEFAULT TRUE,
+    derniere_execution TIMESTAMP NULL,
+    prochaine_execution TIMESTAMP NULL,
+    cree_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    modifie_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 12.6 `files_attente_jobs`
+```sql
+CREATE TABLE files_attente_jobs (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    file VARCHAR(255) NOT NULL DEFAULT 'default',
+    payload LONGTEXT NOT NULL,
+    attempts TINYINT UNSIGNED NOT NULL,
+    reserve_le INT UNSIGNED NULL,
+    disponible_le INT UNSIGNED NOT NULL,
+    cree_le INT UNSIGNED NOT NULL,
+    
+    INDEX idx_file (file),
+    INDEX idx_disponible (disponible_le)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 12.7 `jobs_echoues`
+```sql
+CREATE TABLE jobs_echoues (
+    id CHAR(36) NOT NULL DEFAULT (UUID()) PRIMARY KEY,
+    uuid VARCHAR(255) NOT NULL UNIQUE,
+    connexion VARCHAR(255) NOT NULL,
+    file VARCHAR(255) NOT NULL,
+    payload LONGTEXT NOT NULL,
+    exception LONGTEXT NOT NULL,
+    echoue_le TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 12.8 `sessions`
+```sql
+CREATE TABLE sessions (
+    id VARCHAR(255) NOT NULL PRIMARY KEY,
+    utilisateur_id CHAR(36) NULL,
+    adresse_ip VARCHAR(45) NULL,
+    user_agent TEXT NULL,
+    payload LONGTEXT NOT NULL,
+    derniere_activite INT UNSIGNED NOT NULL,
+    
+    INDEX idx_utilisateur (utilisateur_id),
+    INDEX idx_derniere_activite (derniere_activite),
+    FOREIGN KEY (utilisateur_id) REFERENCES utilisateurs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 12.9 `cache`
+```sql
+CREATE TABLE cache (
+    cle VARCHAR(255) NOT NULL PRIMARY KEY,
+    valeur MEDIUMTEXT NOT NULL,
+    expiration INT UNSIGNED NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE cache_locks (
+    cle VARCHAR(255) NOT NULL PRIMARY KEY,
+    proprietaire VARCHAR(255) NOT NULL,
+    expiration INT UNSIGNED NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+---
+
+## 📊 RÉCAPITULATIF
+
+| Module | Nombre de tables |
+|---|---|
+| 1. Utilisateurs & Rôles | 10 |
+| 2. Restaurants | 8 |
+| 3. Menu & Produits | 12 |
+| 4. Commandes | 8 |
+| 5. Réservations | 4 |
+| 6. Livraison | 6 |
+| 7. Paiements | 10 |
+| 8. Marketing | 8 |
+| 9. Avis | 4 |
+| 10. Notifications | 3 |
+| 11. Support | 3 |
+| 12. Système | 9 |
+| **TOTAL** | **75 tables** |
+
+---
+
+## ⚠️ CORRECTION IMPORTANTE
+
+J'ai remarqué une erreur dans la table `avis` : `note rapidite` devrait être `note_rapidite`. Voici la correction :
+
+```sql
+note_rapidite TINYINT UNSIGNED NULL,
+```

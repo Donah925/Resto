@@ -1,0 +1,480 @@
+# 📋 PLAN DÉTAILLÉ - APPLICATION LARAVEL RESTAURANT
+
+Voici le plan complet et détaillé de votre application Laravel. Je vais structurer cela par **modules** avec la logique métier, les APIs, les rôles concernés et les flux de données.
+
+---
+
+## 🏗️ 1. ARCHITECTURE GLOBALE
+
+### 1.1 Stack technique
+- **Backend** : Laravel 11+ (PHP 8.2+)
+- **Frontend** : Blade + Livewire (ou Vue.js/Inertia si SPA)
+- **Base de données** : MySQL 8 / PostgreSQL 15
+- **Cache** : Redis
+- **File Storage** : AWS S3 / Cloudinary
+- **Queue** : Laravel Queue (Redis driver)
+- **Websockets** : Laravel Reverb / Pusher
+- **Search** : Meilisearch / Algolia
+- **API** : Laravel Sanctum (auth) + API REST
+
+### 1.2 Structure des dossiers Laravel
+```
+app/
+├── Http/
+│   ├── Controllers/
+│   │   ├── Admin/
+│   │   ├── SuperAdmin/
+│   │   ├── Manager/
+│   │   ├── Delivery/
+│   │   ├── Client/
+│   │   └── Api/
+│   ├── Middleware/
+│   ├── Requests/ (Form Requests)
+│   └── Resources/ (API Resources)
+├── Models/
+├── Services/ (Logique métier)
+├── Repositories/ (Accès données)
+├── Events/
+├── Listeners/
+├── Jobs/ (Tâches asynchrones)
+├── Notifications/
+├── Policies/ (Autorisations)
+├── Rules/ (Validation custom)
+└── Enums/ (Status, rôles, etc.)
+```
+
+---
+
+## 👥 2. GESTION DES UTILISATEURS & RÔLES
+
+### 2.1 Architecture d'héritage (STI - Single Table Inheritance + tables liées)
+
+**Principe** : Une table `users` commune + une table par rôle spécifique.
+
+```
+users (table commune)
+├── id
+├── first_name, last_name
+├── email, phone
+├── password (hashed)
+├── role (enum: superadmin, admin, manager, delivery, client)
+├── avatar, status, email_verified_at
+├── last_login_at, locale, timezone
+└── created_at, updated_at
+
+┌─────────────────────────────────────────┐
+│  ↓ Héritage par relation 1-1            │
+├─────────────────────────────────────────┤
+│ super_admin_profiles                    │
+│ manager_profiles (gérants)              │
+│ delivery_profiles (livreurs)            │
+│ client_profiles (clients)               │
+└─────────────────────────────────────────┘
+```
+
+### 2.2 Champs spécifiques par rôle
+
+| Rôle | Table spécifique | Champs ajoutés |
+|---|---|---|
+| **SuperAdmin** | `super_admin_profiles` | `user_id`, `permissions_json`, `notes` |
+| **Admin** | `admin_profiles` | `user_id`, `restaurant_id` (multi-restaurants), `permissions_json` |
+| **Gérant** | `manager_profiles` | `user_id`, `restaurant_id`, `salary`, `hire_date`, `commission_rate` |
+| **Livreur** | `delivery_profiles` | `user_id`, `vehicle_type`, `vehicle_plate`, `license_number`, `rating`, `total_deliveries`, `zone_geojson`, `is_available`, `current_latitude`, `current_longitude`, `bank_rib` |
+| **Client** | `client_profiles` | `user_id`, `loyalty_points`, `total_spent`, `orders_count`, `birth_date`, `dietary_preferences_json`, `default_address_id`, `newsletter_opt_in`, `sms_opt_in`, `referral_code`, `referred_by_id` |
+
+### 2.3 Système d'authentification
+- **Laravel Breeze** ou **Laravel Fortify** pour l'auth de base
+- **Laravel Sanctum** pour les tokens API (mobile + SPA)
+- **Laravel Passport** si OAuth2 complet nécessaire
+- **2FA** (Google Authenticator) pour superadmin/admin/gérant
+- **Social Login** (Google, Facebook, Apple) via Laravel Socialite
+
+### 2.4 Middleware de rôles
+```php
+// Middleware personnalisés
+- RoleMiddleware (vérifie le rôle)
+- PermissionMiddleware (vérifie une permission)
+- RestaurantAccessMiddleware (vérifie accès à un restaurant)
+- DeliveryAvailableMiddleware (livreur dispo)
+- ClientVerifiedMiddleware (email + téléphone vérifiés)
+```
+
+---
+
+## 🍽️ 3. MODULE GESTION DES RESTAURANTS (Multi-tenant)
+
+### 3.1 Fonctionnalités
+- Création de plusieurs restaurants (chaîne)
+- Informations par restaurant : nom, adresse, téléphone, email, horaires, description, logo, photos
+- Gestion des salles (privatisation, capacité)
+- Gestion des tables en salle
+- Jours fériés et fermetures exceptionnelles
+
+### 3.2 Logique métier
+- Un **SuperAdmin** gère tous les restaurants
+- Un **Admin** peut gérer plusieurs restaurants (relation many-to-many via `admin_restaurant`)
+- Un **Gérant** est affecté à UN seul restaurant
+- Horaires dynamiques : `opening_hours` (JSON) + `special_closures` (table)
+
+### 3.3 APIs utilisées
+- **Google Places API** : autocomplétion adresse
+- **Google Geocoding API** : conversion adresse → coordonnées
+- **Google Business Profile API** : synchronisation horaires
+
+---
+
+## 📋 4. MODULE MENU & CARTES
+
+### 4.1 Structure des données
+```
+categories (Entrées, Plats, Desserts, Boissons...)
+  └── subcategories (Viandes, Poissons, Végétarien...)
+       └── products (plats)
+            ├── product_variants (tailles, options)
+            ├── product_addons (suppléments payants)
+            ├── product_allergens (allergènes)
+            ├── product_images
+            └── product_availability (par restaurant, par créneau)
+```
+
+### 4.2 Fonctionnalités
+- Menu par restaurant (chaque restaurant a son menu)
+- Menus du jour / menus saisonniers
+- Menus spéciaux (enfant, affaires, dégustation)
+- Tags : Vegan, Sans gluten, Halal, Bio, Épicé, etc.
+- Allergènes obligatoires (réglementation EU)
+- Photos multiples par plat
+- Notes et descriptions longues
+- Prix TTC / HT (gestion TVA)
+- Gestion des stocks (optionnel : rupture automatique)
+- Mise en avant (plats populaires, nouveautés, chef recommande)
+
+### 4.3 Logique métier
+- **Gérant** peut modifier son menu
+- **Admin** valide les changements sensibles (prix, suppression)
+- **SuperAdmin** voit tout
+- Les modifications sont **versionnées** (historique des changements)
+- Système de **promotion** : -20% sur une catégorie, 2ème plat offert, etc.
+
+### 4.4 APIs utilisées
+- **Cloudinary API** : upload et optimisation automatique des images
+- **Algolia / Meilisearch API** : recherche instantanée dans le menu
+- **DeepL API** : traduction automatique des menus (multi-langue)
+
+---
+
+## 📅 5. MODULE RÉSERVATION DE TABLE
+
+### 5.1 Fonctionnalités
+- Réservation en ligne par le client
+- Gestion des créneaux (par intervalle de 15/30 min)
+- Capacité par table / par salle
+- Gestion de l'attente (waitlist)
+- Confirmation par email/SMS
+- Rappel J-1 automatique
+- No-show tracking
+- Notes client (allergies, occasion spéciale)
+- Plan de salle interactif (drag & drop)
+
+### 5.2 Logique métier
+```
+1. Client choisit date + heure + nb personnes
+2. Système vérifie :
+   - Restaurant ouvert à ce moment
+   - Tables disponibles pour ce nombre
+   - Pas de conflit avec autre réservation
+   - Pas de privatisation ce jour-là
+3. Création réservation (status: pending)
+4. Envoi email/SMS confirmation
+5. Gérant confirme ou refuse (status: confirmed/refused)
+6. Rappel automatique 24h avant
+7. Si no-show → tag client + pénalité optionnelle
+```
+
+### 5.3 APIs utilisées
+- **Zenchef API** OU **TheFork API** OU **Resy API** (si on utilise une plateforme externe)
+- **Twilio API** : SMS de confirmation/rappel
+- **Brevo/SendGrid API** : emails transactionnels
+- **Google Calendar API** : sync avec agenda du restaurant
+
+---
+
+## 🛒 6. MODULE COMMANDE EN LIGNE (E-COMMERCE)
+
+### 6.1 Flux de commande
+```
+1. Client parcourt le menu
+2. Ajoute au panier (avec options, variantes, notes)
+3. Choix du mode :
+   - Livraison à domicile
+   - Click & Collect (retrait sur place)
+   - Sur place (scan QR code table)
+4. Application code promo si applicable
+5. Choix adresse de livraison (si livraison)
+6. Choix créneau horaire
+7. Paiement en ligne
+8. Confirmation + envoi en cuisine
+9. Suivi en temps réel
+10. Livraison / Retrait
+11. Avis client post-commande
+```
+
+### 6.2 Logique métier détaillée
+
+**Panier (Cart)**
+- Stocké en session + Redis
+- Calcul automatique : sous-total, TVA, frais livraison, réductions, total
+- Validation stock en temps réel
+- Minimum de commande par restaurant
+
+**Commande (Order)**
+- Statuts : `pending` → `confirmed` → `preparing` → `ready` → `out_for_delivery` → `delivered` → `completed`
+- Ou : `cancelled` / `refunded`
+- Numéro unique auto-généré (ex: #CMD-20260729-0001)
+- Temps de préparation estimé (calculé selon charge cuisine)
+
+**Paiement**
+- Intent Stripe créé → confirmé après webhook
+- Gestion des échecs (retry, 3D Secure)
+- Remboursements partiels/totaux
+- Historique des transactions
+
+### 6.3 APIs utilisées
+- **Stripe API** (Stripe Payment Intents + Stripe Webhooks)
+- **Stripe Terminal API** (paiement sur place via QR)
+- **Lyf Pay / Apple Pay / Google Pay** (paiements mobiles)
+- **Deliverect API** (agrégateur Uber Eats, Deliveroo, etc.)
+- **Stuart API / Uber Direct API** (livraison dernier km)
+
+---
+
+## 🚚 7. MODULE LIVRAISON
+
+### 7.1 Fonctionnalités
+- Zones de livraison définies par polygone (geojson)
+- Frais de livraison variables selon distance/quartier
+- Assignation automatique ou manuelle aux livreurs
+- Tracking GPS en temps réel du livreur
+- Preuve de livraison (photo + signature)
+- Pourboire optionnel
+- Communication client ↔ livreur (chat)
+
+### 7.2 Logique métier
+```
+1. Commande prête (status: ready)
+2. Système cherche livreur disponible dans la zone
+3. Algorithme d'assignation :
+   - Distance livreur ↔ restaurant
+   - Charge actuelle du livreur
+   - Note du livreur
+   - Type de véhicule (vélo, scooter, voiture)
+4. Notification push au livreur
+5. Livreur accepte → status: out_for_delivery
+6. Client suit en temps réel (websockets)
+7. Livraison effectuée → preuve + signature
+8. Client note le livreur
+```
+
+### 7.3 APIs utilisées
+- **Google Maps Directions API** : calcul distance/temps
+- **Google Maps JavaScript API** : carte tracking
+- **Firebase Cloud Messaging (FCM)** : push notifications livreurs
+- **Laravel Reverb / Pusher** : websockets pour tracking temps réel
+- **Twilio API** : SMS client si problème
+
+---
+
+## 💳 8. MODULE PAIEMENT & FACTURATION
+
+### 8.1 Fonctionnalités
+- Paiement en ligne (CB, Apple Pay, Google Pay)
+- Paiement à la livraison (cash)
+- Paiement sur place (TPE, QR code)
+- Cartes cadeaux (achat + utilisation)
+- Portefeuille client (crédit prépayé)
+- Pourboires (livreur, restaurant)
+- Factures automatiques (TVA, SIRET)
+- Avoirs et remboursements
+
+### 8.2 Logique métier
+- Chaque transaction liée à une commande
+- Réconciliation automatique avec relevés bancaires
+- Commission plateforme (si multi-restaurants)
+- Reversement automatique aux gérants (fin de mois)
+- Gestion TVA par pays (si international)
+
+### 8.3 APIs utilisées
+- **Stripe API** (paiements, cartes cadeaux, wallets)
+- **Pennylane API / QuickBooks API** : sync comptable
+- **Stripe Billing API** : abonnements (ex: box mensuelle)
+
+---
+
+## ⭐ 9. MODULE AVIS & RÉPUTATION
+
+### 9.1 Fonctionnalités
+- Avis après commande (note + commentaire + photos)
+- Modération (validation avant publication)
+- Réponses du restaurant
+- Signalement avis abusifs
+- Agrégation notes moyennes
+- Badge "Top Restaurant" si note > 4.5
+
+### 9.2 Logique métier
+- Un client ne peut laisser qu'UN avis par commande
+- Avis masqué si commande remboursée
+- Relance automatique J+3 si pas d'avis
+- Calcul note pondérée (récente > ancienne)
+
+### 9.3 APIs utilisées
+- **Google Business Profile API** : remontée avis Google
+- **Trustpilot API** : lien vers Trustpilot
+- **TripAdvisor Content API** : agrégation
+
+---
+
+## 🎁 10. MODULE FIDÉLITÉ & MARKETING
+
+### 10.1 Fonctionnalités
+- Programme de points (1€ = 1 point, 100 points = 10€)
+- Niveaux (Bronze, Silver, Gold, Platinum)
+- Cadeaux anniversaire
+- Codes promo (globaux, par restaurant, par catégorie)
+- Parrainage (client parrain → bonus)
+- Newsletter
+- Notifications push ciblées
+- Campagnes email automatisées
+
+### 10.2 Logique métier
+- Points gagnés à chaque commande payée
+- Points perdus après 12 mois d'inactivité
+- Cashback sur certaines périodes
+- Offre personnalisée selon historique (recommandation IA)
+
+### 10.3 APIs utilisées
+- **Brevo / Mailchimp API** : email marketing
+- **OneSignal API** : notifications push
+- **Meta Conversions API** : tracking publicitaire
+- **Google Ads API** : retargeting
+
+---
+
+## 📊 11. MODULE TABLEAU DE BORD & ANALYTICS
+
+### 11.1 Fonctionnalités par rôle
+
+**SuperAdmin**
+- Vue globale tous restaurants
+- CA total, croissance, top restaurants
+- Nombre utilisateurs par rôle
+- Alertes (restaurant en baisse, stock critique)
+
+**Admin**
+- CA par restaurant
+- Top plats, top clients
+- Taux de conversion (visiteurs → commandes)
+- Performance livreurs
+
+**Gérant**
+- CA journalier/hebdomadaire/mensuel
+- Commandes en cours
+- Réservations du jour
+- Stock faible
+- Avis récents
+- Planning employés
+
+**Livreur**
+- Gains du jour/semaine/mois
+- Nombre livraisons
+- Note moyenne
+- Itinéraire optimisé
+
+**Client**
+- Historique commandes
+- Points fidélité
+- Commandes en cours (tracking)
+- Adresses sauvegardées
+- Favoris
+
+### 11.2 APIs utilisées
+- **Chart.js / ApexCharts** (front)
+- **Google Analytics 4 API** : analytics avancés
+- **Mixpanel API** : comportement utilisateurs
+- **Plausible API** : analytics privacy-friendly
+
+---
+
+## 🔐 12. MODULE SÉCURITÉ & CONFORMITÉ
+
+### 12.1 Fonctionnalités
+- RGPD (export/suppression données client)
+- Consentement cookies
+- Journal d'audit (qui a fait quoi, quand)
+- Protection CSRF, XSS, SQL injection (natif Laravel)
+- Rate limiting sur les APIs
+- 2FA pour rôles sensibles
+- Détection activités suspectes
+- Backup automatique BDD
+
+### 12.2 APIs utilisées
+- **Cookiebot / Axeptio API** : gestion cookies
+- **Let's Encrypt** : SSL
+- **Sentry API** : monitoring erreurs
+- **UptimeRobot API** : monitoring disponibilité
+
+---
+
+## 🔌 13. MODULE INTÉGRATIONS & AUTOMATISATIONS
+
+### 13.1 APIs tierces à intégrer
+
+| Catégorie | API | Usage |
+|---|---|---|
+| **Cartes** | Google Maps, Mapbox | Géolocalisation, itinéraires |
+| **Paiement** | Stripe, PayPal, Mollie | Transactions |
+| **Communication** | Twilio, Brevo, SendGrid | SMS, emails |
+| **Réservation** | Zenchef, TheFork | Gestion tables |
+| **Livraison** | Deliverect, Stuart | Agrégation livreurs |
+| **POS/Caisse** | Lightspeed, Addictgroup, L'Addition | Sync commandes |
+| **Compta** | Pennylane, QuickBooks | Facturation |
+| **Images** | Cloudinary, Imgix | Stockage photos |
+| **Recherche** | Algolia, Meilisearch | Recherche rapide |
+| **Traduction** | DeepL, Weglot | Multi-langue |
+| **Analytics** | GA4, Mixpanel, Plausible | Stats |
+| **Réseaux sociaux** | Meta Graph API, TikTok API | Flux Instagram |
+| **Avis** | Google, TripAdvisor, Trustpilot | Réputation |
+| **Météo** | OpenWeatherMap | Suggestions adaptatives |
+| **Notifications** | FCM, OneSignal | Push |
+| **Auth** | Google, Facebook, Apple | Social login |
+| **SMS** | Twilio, OVH SMS | Notifications |
+| **Fidélité** | Talon.One | Programmes avancés |
+| **Automatisation** | Zapier, Make (n8n) | Workflows |
+
+### 13.2 Système de webhooks
+- Laravel Revere webhooks pour Stripe, Deliverect, etc.
+- Queue dédiée pour traitement asynchrone
+- Retry automatique en cas d'échec
+- Logs complets pour debug
+
+---
+
+## 📱 14. MODULE NOTIFICATIONS
+
+### 14.1 Canaux
+- **Email** : confirmations, factures, newsletter
+- **SMS** : rappels, codes OTP, urgences
+- **Push** : suivi commande, promos
+- **In-app** : cloche de notifications
+- **WhatsApp** (optionnel via Twilio)
+
+### 14.2 Événements déclencheurs
+- Commande confirmée / en préparation / prête / en livraison / livrée
+- Réservation confirmée / rappel
+- Nouveau message support
+- Promotion personnalisée
+- Anniversaire client
+- Nouveau avis reçu (restaurant)
+
+
+
+

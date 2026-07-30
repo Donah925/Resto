@@ -1,0 +1,5074 @@
+# 🎯 MODÈLES ELOQUENT - LARAVEL RESTAURANT
+
+Voici la création complète des modèles Eloquent, organisée de manière stratégique.
+
+---
+
+## 🏗️ 1. INFRASTRUCTURE DE BASE
+
+### 1.1 `app/Models/BaseModel.php` (Modèle parent)
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\SoftDeletes;
+
+abstract class BaseModel extends Model
+{
+    use HasUuids;
+
+    // UUID comme clé primaire
+    public $incrementing = false;
+    protected $keyType = 'string';
+
+    // Mapping des timestamps français
+    const CREATED_AT = 'cree_le';
+    const UPDATED_AT = 'modifie_le';
+
+    protected $dateFormat = 'Y-m-d H:i:s';
+
+    // Dates par défaut
+    protected $casts = [
+        'cree_le' => 'datetime',
+        'modifie_le' => 'datetime',
+    ];
+
+    /**
+     * Génère automatiquement un UUID si non fourni
+     */
+    protected static function booted()
+    {
+        static::creating(function ($model) {
+            if (empty($model->{$model->getKeyName()})) {
+                $model->{$model->getKeyName()} = (string) \Illuminate\Support\Str::uuid();
+            }
+        });
+    }
+}
+```
+
+### 1.2 `app/Models/SoftDeleteModel.php` (Pour tables avec soft delete)
+
+```php
+<?php
+
+namespace App\Models;
+
+abstract class SoftDeleteModel extends BaseModel
+{
+    use SoftDeletes;
+
+    const DELETED_AT = 'supprime_le';
+}
+```
+
+### 1.3 `app/Traits/HasTranslations.php` (Multi-langue JSON)
+
+```php
+<?php
+
+namespace App\Traits;
+
+trait HasTranslations
+{
+    /**
+     * Récupère la valeur traduite pour la langue courante
+     */
+    public function getTranslation(string $attribute, ?string $locale = null): string
+    {
+        $locale = $locale ?? app()->getLocale();
+        $value = $this->getAttributes()[$attribute] ?? null;
+
+        if (is_string($value)) {
+            $value = json_decode($value, true);
+        }
+
+        return $value[$locale] ?? $value['fr'] ?? $value[array_key_first($value ?? [])] ?? '';
+    }
+
+    /**
+     * Accès magique : $model->nom (retourne la traduction courante)
+     */
+    public function getAttribute($key)
+    {
+        if (in_array($key, $this->translatable ?? [])) {
+            return $this->getTranslation($key);
+        }
+
+        return parent::getAttribute($key);
+    }
+
+    /**
+     * Accès à toutes les traductions : $model->getTranslations('nom')
+     */
+    public function getTranslations(string $attribute): array
+    {
+        $value = $this->getAttributes()[$attribute] ?? null;
+
+        if (is_string($value)) {
+            return json_decode($value, true) ?? [];
+        }
+
+        return $value ?? [];
+    }
+
+    /**
+     * Définit une traduction : $model->setTranslation('nom', 'fr', 'Pizza')
+     */
+    public function setTranslation(string $attribute, string $locale, string $value): self
+    {
+        $current = $this->getTranslations($attribute);
+        $current[$locale] = $value;
+        $this->attributes[$attribute] = json_encode($current, JSON_UNESCAPED_UNICODE);
+
+        return $this;
+    }
+}
+```
+
+### 1.4 `app/Traits/HasSlug.php` (Génération automatique de slug)
+
+```php
+<?php
+
+namespace App\Traits;
+
+use Illuminate\Support\Str;
+
+trait HasSlug
+{
+    protected static function bootHasSlug()
+    {
+        static::creating(function ($model) {
+            if (empty($model->slug) && !empty($model->nom)) {
+                $nom = is_array($model->nom) ? ($model->nom['fr'] ?? reset($model->nom)) : $model->nom;
+                $model->slug = Str::slug($nom);
+            }
+        });
+    }
+}
+```
+
+---
+
+## 🎨 2. ENUMS PHP (Pour les champs ENUM)
+
+### 2.1 `app/Enums/RoleUtilisateur.php`
+
+```php
+<?php
+
+namespace App\Enums;
+
+enum RoleUtilisateur: string
+{
+    case SUPERADMIN = 'superadmin';
+    case ADMIN = 'admin';
+    case GERANT = 'gerant';
+    case LIVREUR = 'livreur';
+    case CLIENT = 'client';
+
+    public function label(): string
+    {
+        return match($this) {
+            self::SUPERADMIN => 'Super Administrateur',
+            self::ADMIN => 'Administrateur',
+            self::GERANT => 'Gérant',
+            self::LIVREUR => 'Livreur',
+            self::CLIENT => 'Client',
+        };
+    }
+}
+```
+
+### 2.2 `app/Enums/StatutUtilisateur.php`
+
+```php
+<?php
+
+namespace App\Enums;
+
+enum StatutUtilisateur: string
+{
+    case ACTIF = 'actif';
+    case INACTIF = 'inactif';
+    case SUSPENDU = 'suspendu';
+    case BANNI = 'banni';
+}
+```
+
+### 2.3 `app/Enums/StatutCommande.php`
+
+```php
+<?php
+
+namespace App\Enums;
+
+enum StatutCommande: string
+{
+    case EN_ATTENTE = 'en_attente';
+    case CONFIRMEE = 'confirmee';
+    case EN_PREPARATION = 'en_preparation';
+    case PRETE = 'prete';
+    case EN_LIVRAISON = 'en_livraison';
+    case LIVREE = 'livree';
+    case TERMINEE = 'terminee';
+    case ANNULEE = 'annulee';
+    case REMBOURSEE = 'remboursee';
+
+    public function label(): string
+    {
+        return match($this) {
+            self::EN_ATTENTE => 'En attente',
+            self::CONFIRMEE => 'Confirmée',
+            self::EN_PREPARATION => 'En préparation',
+            self::PRETE => 'Prête',
+            self::EN_LIVRAISON => 'En livraison',
+            self::LIVREE => 'Livrée',
+            self::TERMINEE => 'Terminée',
+            self::ANNULEE => 'Annulée',
+            self::REMBOURSEE => 'Remboursée',
+        };
+    }
+
+    public function color(): string
+    {
+        return match($this) {
+            self::EN_ATTENTE => 'yellow',
+            self::CONFIRMEE => 'blue',
+            self::EN_PREPARATION => 'indigo',
+            self::PRETE => 'cyan',
+            self::EN_LIVRAISON => 'purple',
+            self::LIVREE => 'green',
+            self::TERMINEE => 'gray',
+            self::ANNULEE => 'red',
+            self::REMBOURSEE => 'orange',
+        };
+    }
+}
+```
+
+### 2.4 `app/Enums/TypeCommande.php`
+
+```php
+<?php
+
+namespace App\Enums;
+
+enum TypeCommande: string
+{
+    case LIVRAISON = 'livraison';
+    case RETRAIT = 'retrait';
+    case SUR_PLACE = 'sur_place';
+}
+```
+
+### 2.5 `app/Enums/MethodePaiement.php`
+
+```php
+<?php
+
+namespace App\Enums;
+
+enum MethodePaiement: string
+{
+    case CARTE_BANCAIRE = 'carte_bancaire';
+    case MTN_MOBILE_MONEY = 'mtn_mobile_money';
+    case MOOV_MONEY = 'moov_money';
+    case ORANGE_MONEY = 'orange_money';
+    case WAVE = 'wave';
+    case PAYPAL = 'paypal';
+    case PAYEER = 'payeer';
+    case PAYONEER = 'payoneer';
+    case PORTEFEUILLE = 'portefeuille';
+    case CARTE_CADEAU = 'carte_cadeau';
+    case ESPECES_LIVRAISON = 'especes_livraison';
+    case VIREMENT = 'virement';
+}
+```
+
+---
+
+## 👥 3. MODULE UTILISATEURS & RÔLES (10 modèles)
+
+### 3.1 `app/Models/Utilisateur.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use App\Enums\RoleUtilisateur;
+use App\Enums\StatutUtilisateur;
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Notifications\Notifiable;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Laravel\Sanctum\HasApiTokens;
+use Spatie\Permission\Traits\HasRoles;
+
+class Utilisateur extends Authenticatable
+{
+    use HasUuids, Notifiable, HasApiTokens, HasRoles, SoftDeletes;
+
+    protected $table = 'utilisateurs';
+
+    public $incrementing = false;
+    protected $keyType = 'string';
+
+    const CREATED_AT = 'cree_le';
+    const UPDATED_AT = 'modifie_le';
+    const DELETED_AT = 'supprime_le';
+
+    protected $fillable = [
+        'prenom',
+        'nom',
+        'email',
+        'telephone',
+        'mot_de_passe',
+        'role',
+        'avatar',
+        'statut',
+        'derniere_connexion_le',
+        'langue',
+        'fuseau_horaire',
+        'photo_profil_chemin',
+    ];
+
+    protected $hidden = [
+        'mot_de_passe',
+        'token_remember',
+        'deux_facteur_secret',
+        'deux_facteur_codes_recuperation',
+    ];
+
+    protected $casts = [
+        'email_verifie_le' => 'datetime',
+        'telephone_verifie_le' => 'datetime',
+        'derniere_connexion_le' => 'datetime',
+        'cree_le' => 'datetime',
+        'modifie_le' => 'datetime',
+        'supprime_le' => 'datetime',
+        'role' => RoleUtilisateur::class,
+        'statut' => StatutUtilisateur::class,
+    ];
+
+    // ===== ATTRIBUTS ACCESSORS =====
+
+    public function getNomCompletAttribute(): string
+    {
+        return "{$this->prenom} {$this->nom}";
+    }
+
+    public function getAvatarUrlAttribute(): string
+    {
+        return $this->avatar
+            ? asset('storage/' . $this->avatar)
+            : 'https://ui-avatars.com/api/?name=' . urlencode($this->nom_complet) . '&background=random';
+    }
+
+    // ===== RELATIONS PROFILS =====
+
+    public function profilSuperAdmin(): HasOne
+    {
+        return $this->hasOne(ProfilSuperAdmin::class, 'utilisateur_id');
+    }
+
+    public function profilAdmin(): HasOne
+    {
+        return $this->hasOne(ProfilAdmin::class, 'utilisateur_id');
+    }
+
+    public function profilGerant(): HasOne
+    {
+        return $this->hasOne(ProfilGerant::class, 'utilisateur_id');
+    }
+
+    public function profilLivreur(): HasOne
+    {
+        return $this->hasOne(ProfilLivreur::class, 'utilisateur_id');
+    }
+
+    public function profilClient(): HasOne
+    {
+        return $this->hasOne(ProfilClient::class, 'utilisateur_id');
+    }
+
+    /**
+     * Retourne le profil selon le rôle
+     */
+    public function getProfilAttribute()
+    {
+        return match($this->role) {
+            RoleUtilisateur::SUPERADMIN => $this->profilSuperAdmin,
+            RoleUtilisateur::ADMIN => $this->profilAdmin,
+            RoleUtilisateur::GERANT => $this->profilGerant,
+            RoleUtilisateur::LIVREUR => $this->profilLivreur,
+            RoleUtilisateur::CLIENT => $this->profilClient,
+            default => null,
+        };
+    }
+
+    // ===== SCOPES =====
+
+    public function scopeActifs($query)
+    {
+        return $query->where('statut', StatutUtilisateur::ACTIF);
+    }
+
+    public function scopeRole($query, RoleUtilisateur $role)
+    {
+        return $query->where('role', $role);
+    }
+
+    public function scopeClients($query)
+    {
+        return $query->where('role', RoleUtilisateur::CLIENT);
+    }
+
+    public function scopeLivreurs($query)
+    {
+        return $query->where('role', RoleUtilisateur::LIVREUR);
+    }
+
+    // ===== MÉTHODES UTILITAIRES =====
+
+    public function estActif(): bool
+    {
+        return $this->statut === StatutUtilisateur::ACTIF;
+    }
+
+    public function estClient(): bool
+    {
+        return $this->role === RoleUtilisateur::CLIENT;
+    }
+
+    public function estGerant(): bool
+    {
+        return $this->role === RoleUtilisateur::GERANT;
+    }
+
+    public function estAdmin(): bool
+    {
+        return in_array($this->role, [RoleUtilisateur::ADMIN, RoleUtilisateur::SUPERADMIN]);
+    }
+
+    public function estSuperAdmin(): bool
+    {
+        return $this->role === RoleUtilisateur::SUPERADMIN;
+    }
+}
+```
+
+### 3.2 `app/Models/ProfilSuperAdmin.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class ProfilSuperAdmin extends BaseModel
+{
+    protected $table = 'profils_super_admin';
+
+    protected $fillable = [
+        'utilisateur_id',
+        'permissions',
+        'notes',
+    ];
+
+    protected $casts = [
+        'permissions' => 'array',
+    ];
+
+    // ===== RELATIONS =====
+
+    public function utilisateur(): BelongsTo
+    {
+        return $this->belongsTo(Utilisateur::class, 'utilisateur_id');
+    }
+}
+```
+
+### 3.3 `app/Models/ProfilAdmin.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+
+class ProfilAdmin extends BaseModel
+{
+    protected $table = 'profils_admin';
+
+    protected $fillable = [
+        'utilisateur_id',
+        'permissions',
+        'notes',
+    ];
+
+    protected $casts = [
+        'permissions' => 'array',
+    ];
+
+    // ===== RELATIONS =====
+
+    public function utilisateur(): BelongsTo
+    {
+        return $this->belongsTo(Utilisateur::class, 'utilisateur_id');
+    }
+
+    public function restaurants(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            Restaurant::class,
+            'restaurant_admin',
+            'admin_id',
+            'restaurant_id'
+        );
+    }
+}
+```
+
+### 3.4 `app/Models/ProfilGerant.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+class ProfilGerant extends BaseModel
+{
+    protected $table = 'profils_gerant';
+
+    protected $fillable = [
+        'utilisateur_id',
+        'restaurant_id',
+        'salaire',
+        'date_embauche',
+        'taux_commission',
+    ];
+
+    protected $casts = [
+        'date_embauche' => 'date',
+        'salaire' => 'decimal:2',
+        'taux_commission' => 'decimal:2',
+    ];
+
+    // ===== RELATIONS =====
+
+    public function utilisateur(): BelongsTo
+    {
+        return $this->belongsTo(Utilisateur::class, 'utilisateur_id');
+    }
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function reversements(): HasMany
+    {
+        return $this->hasMany(ReversementGerant::class, 'gerant_id');
+    }
+
+    // ===== SCOPES =====
+
+    public function scopeRestaurant($query, $restaurantId)
+    {
+        return $query->where('restaurant_id', $restaurantId);
+    }
+}
+```
+
+### 3.5 `app/Models/ProfilLivreur.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+class ProfilLivreur extends BaseModel
+{
+    protected $table = 'profils_livreur';
+
+    protected $fillable = [
+        'utilisateur_id',
+        'type_vehicule',
+        'immatriculation',
+        'numero_permis',
+        'note',
+        'total_livraisons',
+        'zone_geojson',
+        'est_disponible',
+        'latitude_courante',
+        'longitude_courante',
+        'derniere_maj_localisation',
+        'rib_bancaire',
+        'nom_banque',
+        'titulaire_compte',
+        'total_gains',
+    ];
+
+    protected $casts = [
+        'note' => 'decimal:2',
+        'total_livraisons' => 'integer',
+        'zone_geojson' => 'array',
+        'est_disponible' => 'boolean',
+        'latitude_courante' => 'decimal:8',
+        'longitude_courante' => 'decimal:8',
+        'derniere_maj_localisation' => 'datetime',
+        'total_gains' => 'decimal:2',
+    ];
+
+    protected $attributes = [
+        'est_disponible' => false,
+        'total_livraisons' => 0,
+        'total_gains' => 0,
+        'note' => 5.00,
+    ];
+
+    // ===== RELATIONS =====
+
+    public function utilisateur(): BelongsTo
+    {
+        return $this->belongsTo(Utilisateur::class, 'utilisateur_id');
+    }
+
+    public function livraisons(): HasMany
+    {
+        return $this->hasMany(Livraison::class, 'livreur_id');
+    }
+
+    public function evaluations(): HasMany
+    {
+        return $this->hasMany(EvaluationLivreur::class, 'livreur_id');
+    }
+
+    public function planning(): HasMany
+    {
+        return $this->hasMany(PlanningLivreur::class, 'livreur_id');
+    }
+
+    // ===== SCOPES =====
+
+    public function scopeDisponibles($query)
+    {
+        return $query->where('est_disponible', true);
+    }
+
+    public function scopeDansZone($query, $latitude, $longitude, $rayonKm = 10)
+    {
+        // Formule Haversine simplifiée pour MySQL
+        return $query->whereRaw("
+            (6371 * acos(
+                cos(radians(?)) * cos(radians(latitude_courante)) *
+                cos(radians(longitude_courante) - radians(?)) +
+                sin(radians(?)) * sin(radians(latitude_courante))
+            )) <= ?
+        ", [$latitude, $longitude, $latitude, $rayonKm]);
+    }
+
+    // ===== MÉTHODES =====
+
+    public function mettreAJourLocalisation(float $lat, float $lng): self
+    {
+        $this->update([
+            'latitude_courante' => $lat,
+            'longitude_courante' => $lng,
+            'derniere_maj_localisation' => now(),
+        ]);
+
+        return $this;
+    }
+}
+```
+
+### 3.6 `app/Models/ProfilClient.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Str;
+
+class ProfilClient extends BaseModel
+{
+    protected $table = 'profils_client';
+
+    protected $fillable = [
+        'utilisateur_id',
+        'points_fidelite',
+        'total_depense',
+        'nombre_commandes',
+        'date_naissance',
+        'preferences_alimentaires',
+        'adresse_par_defaut_id',
+        'opt_in_newsletter',
+        'opt_in_sms',
+        'opt_in_push',
+        'code_parrainage',
+        'parraine_par_id',
+        'bonus_parrainage_reclame',
+        'derniere_commande_le',
+    ];
+
+    protected $casts = [
+        'points_fidelite' => 'integer',
+        'total_depense' => 'decimal:2',
+        'nombre_commandes' => 'integer',
+        'date_naissance' => 'date',
+        'preferences_alimentaires' => 'array',
+        'opt_in_newsletter' => 'boolean',
+        'opt_in_sms' => 'boolean',
+        'opt_in_push' => 'boolean',
+        'bonus_parrainage_reclame' => 'boolean',
+        'derniere_commande_le' => 'datetime',
+    ];
+
+    protected $attributes = [
+        'points_fidelite' => 0,
+        'total_depense' => 0,
+        'nombre_commandes' => 0,
+    ];
+
+    // ===== BOOT : Génération auto du code parrainage =====
+
+    protected static function booted()
+    {
+        parent::booted();
+
+        static::creating(function ($client) {
+            if (empty($client->code_parrainage)) {
+                $client->code_parrainage = strtoupper(Str::random(8));
+            }
+        });
+    }
+
+    // ===== RELATIONS =====
+
+    public function utilisateur(): BelongsTo
+    {
+        return $this->belongsTo(Utilisateur::class, 'utilisateur_id');
+    }
+
+    public function adresses(): HasMany
+    {
+        return $this->hasMany(Adresse::class, 'client_id');
+    }
+
+    public function adresseParDefaut(): BelongsTo
+    {
+        return $this->belongsTo(Adresse::class, 'adresse_par_defaut_id');
+    }
+
+    public function commandes(): HasMany
+    {
+        return $this->hasMany(Commande::class, 'client_id');
+    }
+
+    public function reservations(): HasMany
+    {
+        return $this->hasMany(Reservation::class, 'client_id');
+    }
+
+    public function avis(): HasMany
+    {
+        return $this->hasMany(Avi::class, 'client_id');
+    }
+
+    public function portefeuille(): HasOne
+    {
+        return $this->hasOne(Portefeuille::class, 'client_id');
+    }
+
+    public function transactionsFidelite(): HasMany
+    {
+        return $this->hasMany(TransactionFidelite::class, 'client_id');
+    }
+
+    public function favoris(): HasMany
+    {
+        return $this->hasMany(FavorisClient::class, 'client_id');
+    }
+
+    public function parrain(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'parraine_par_id');
+    }
+
+    public function filleuls(): HasMany
+    {
+        return $this->hasMany(self::class, 'parraine_par_id');
+    }
+
+    // ===== SCOPES =====
+
+    public function scopeFideles($query, int $pointsMin = 100)
+    {
+        return $query->where('points_fidelite', '>=', $pointsMin);
+    }
+
+    public function scopeActifs($query)
+    {
+        return $query->whereHas('utilisateur', fn($q) => $q->where('statut', 'actif'));
+    }
+
+    // ===== MÉTHODES =====
+
+    public function ajouterPointsFidelite(int $points, string $description = null): void
+    {
+        $ancienSolde = $this->points_fidelite;
+        $this->increment('points_fidelite', $points);
+
+        $this->transactionsFidelite()->create([
+            'type_transaction' => 'gain',
+            'nombre_points' => $points,
+            'solde_avant' => $ancienSolde,
+            'solde_apres' => $this->points_fidelite,
+            'description' => $description,
+        ]);
+    }
+
+    public function utiliserPointsFidelite(int $points, string $description = null): bool
+    {
+        if ($this->points_fidelite < $points) {
+            return false;
+        }
+
+        $ancienSolde = $this->points_fidelite;
+        $this->decrement('points_fidelite', $points);
+
+        $this->transactionsFidelite()->create([
+            'type_transaction' => 'utilisation',
+            'nombre_points' => -$points,
+            'solde_avant' => $ancienSolde,
+            'solde_apres' => $this->points_fidelite,
+            'description' => $description,
+        ]);
+
+        return true;
+    }
+
+    public function getNiveauFideliteAttribute(): string
+    {
+        $points = $this->points_fidelite;
+
+        return match(true) {
+            $points >= 1000 => 'Platine',
+            $points >= 500 => 'Or',
+            $points >= 200 => 'Argent',
+            $points >= 50 => 'Bronze',
+            default => 'Standard',
+        };
+    }
+}
+```
+
+### 3.7 `app/Models/Adresse.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class Adresse extends BaseModel
+{
+    protected $table = 'adresses';
+
+    protected $fillable = [
+        'client_id',
+        'libelle',
+        'adresse_voie',
+        'appartement',
+        'ville',
+        'region',
+        'code_postal',
+        'pays',
+        'latitude',
+        'longitude',
+        'instructions_livraison',
+        'est_par_defaut',
+    ];
+
+    protected $casts = [
+        'latitude' => 'decimal:8',
+        'longitude' => 'decimal:8',
+        'est_par_defaut' => 'boolean',
+    ];
+
+    // ===== RELATIONS =====
+
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(ProfilClient::class, 'client_id');
+    }
+
+    public function commandes(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(Commande::class, 'adresse_livraison_id');
+    }
+
+    // ===== SCOPES =====
+
+    public function scopeParDefaut($query)
+    {
+        return $query->where('est_par_defaut', true);
+    }
+
+    // ===== MÉTHODES =====
+
+    public function getAdresseCompleteAttribute(): string
+    {
+        $parts = array_filter([
+            $this->adresse_voie,
+            $this->appartement,
+            $this->ville,
+            $this->code_postal,
+            $this->pays,
+        ]);
+
+        return implode(', ', $parts);
+    }
+
+    /**
+     * Définit cette adresse comme par défaut et retire le statut des autres
+     */
+    public function definirCommeDefaut(): void
+    {
+        self::where('client_id', $this->client_id)
+            ->where('id', '!=', $this->id)
+            ->update(['est_par_defaut' => false]);
+
+        $this->update(['est_par_defaut' => true]);
+    }
+}
+```
+
+### 3.8 `app/Models/Role.php` (Spatie Permission)
+
+```php
+<?php
+
+namespace App\Models;
+
+use Spatie\Permission\Models\Role as SpatieRole;
+
+class Role extends SpatieRole
+{
+    // On hérite de Spatie mais on adapte les timestamps
+    const CREATED_AT = 'cree_le';
+    const UPDATED_AT = 'modifie_le';
+}
+```
+
+### 3.9 `app/Models/Permission.php` (Spatie Permission)
+
+```php
+<?php
+
+namespace App\Models;
+
+use Spatie\Permission\Models\Permission as SpatiePermission;
+
+class Permission extends SpatiePermission
+{
+    const CREATED_AT = 'cree_le';
+    const UPDATED_AT = 'modifie_le';
+}
+```
+
+---
+
+## 🍽️ 4. MODULE RESTAURANTS (8 modèles)
+
+### 4.1 `app/Models/Restaurant.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use App\Traits\HasTranslations;
+use App\Traits\HasSlug;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+
+class Restaurant extends SoftDeleteModel
+{
+    use HasTranslations, HasSlug;
+
+    protected $table = 'restaurants';
+
+    public array $translatable = ['nom', 'description'];
+
+    protected $fillable = [
+        'nom',
+        'slug',
+        'description',
+        'logo',
+        'image_couverture',
+        'telephone',
+        'email',
+        'site_web',
+        'adresse',
+        'ville',
+        'code_postal',
+        'pays',
+        'latitude',
+        'longitude',
+        'fuseau_horaire',
+        'devise',
+        'taux_tva',
+        'livraison_activee',
+        'retrait_active',
+        'sur_place_active',
+        'montant_minimum_commande',
+        'rayon_max_livraison',
+        'temps_preparation',
+        'note',
+        'total_avis',
+        'est_en_avant',
+        'statut',
+    ];
+
+    protected $casts = [
+        'latitude' => 'decimal:8',
+        'longitude' => 'decimal:8',
+        'taux_tva' => 'decimal:2',
+        'livraison_activee' => 'boolean',
+        'retrait_active' => 'boolean',
+        'sur_place_active' => 'boolean',
+        'montant_minimum_commande' => 'decimal:2',
+        'note' => 'decimal:2',
+        'total_avis' => 'integer',
+        'est_en_avant' => 'boolean',
+    ];
+
+    // ===== RELATIONS =====
+
+    public function gerant(): HasOne
+    {
+        return $this->hasOne(ProfilGerant::class, 'restaurant_id');
+    }
+
+    public function admins(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            ProfilAdmin::class,
+            'restaurant_admin',
+            'restaurant_id',
+            'admin_id'
+        );
+    }
+
+    public function horaires(): HasMany
+    {
+        return $this->hasMany(HoraireRestaurant::class, 'restaurant_id');
+    }
+
+    public function fermeturesSpeciales(): HasMany
+    {
+        return $this->hasMany(FermetureSpecialeRestaurant::class, 'restaurant_id');
+    }
+
+    public function salles(): HasMany
+    {
+        return $this->hasMany(SalleRestaurant::class, 'restaurant_id');
+    }
+
+    public function tables(): HasMany
+    {
+        return $this->hasMany(TableRestaurant::class, 'restaurant_id');
+    }
+
+    public function categories(): HasMany
+    {
+        return $this->hasMany(Categorie::class, 'restaurant_id');
+    }
+
+    public function produits(): HasMany
+    {
+        return $this->hasManyThrough(Produit::class, Categorie::class, 'restaurant_id');
+    }
+
+    public function commandes(): HasMany
+    {
+        return $this->hasMany(Commande::class, 'restaurant_id');
+    }
+
+    public function reservations(): HasMany
+    {
+        return $this->hasMany(Reservation::class, 'restaurant_id');
+    }
+
+    public function avis(): HasMany
+    {
+        return $this->hasMany(Avi::class, 'restaurant_id');
+    }
+
+    public function zonesLivraison(): HasMany
+    {
+        return $this->hasMany(ZoneLivraison::class, 'restaurant_id');
+    }
+
+    public function images(): HasMany
+    {
+        return $this->hasMany(ImageRestaurant::class, 'restaurant_id');
+    }
+
+    public function services(): HasMany
+    {
+        return $this->hasMany(ServiceRestaurant::class, 'restaurant_id');
+    }
+
+    public function menusDuJour(): HasMany
+    {
+        return $this->hasMany(MenuDuJour::class, 'restaurant_id');
+    }
+
+    public function configurationsPaiement(): HasMany
+    {
+        return $this->hasMany(ConfigurationPaiement::class, 'restaurant_id');
+    }
+
+    // ===== SCOPES =====
+
+    public function scopeActifs($query)
+    {
+        return $query->where('statut', 'actif');
+    }
+
+    public function scopeEnAvant($query)
+    {
+        return $query->where('est_en_avant', true);
+    }
+
+    public function scopeAvecLivraison($query)
+    {
+        return $query->where('livraison_activee', true);
+    }
+
+    public function scopeOuvertsMaintenant($query)
+    {
+        $now = now()->format('H:i:s');
+        $jour = now()->dayOfWeek; // 0 = dimanche
+
+        return $query->whereHas('horaires', function($q) use ($now, $jour) {
+            $q->where('jour_semaine', $jour)
+              ->where('est_ferme', false)
+              ->where('heure_ouverture', '<=', $now)
+              ->where('heure_fermeture', '>=', $now);
+        });
+    }
+
+    public function scopeProchesDe($query, float $latitude, float $longitude, int $rayonKm = 10)
+    {
+        return $query->selectRaw("*, 
+            (6371 * acos(
+                cos(radians(?)) * cos(radians(latitude)) *
+                cos(radians(longitude) - radians(?)) +
+                sin(radians(?)) * sin(radians(latitude))
+            )) AS distance
+        ", [$latitude, $longitude, $latitude])
+        ->having('distance', '<=', $rayonKm)
+        ->orderBy('distance');
+    }
+
+    // ===== MÉTHODES =====
+
+    public function estOuvertMaintenant(): bool
+    {
+        $now = now()->format('H:i:s');
+        $jour = now()->dayOfWeek;
+
+        // Vérifier fermetures spéciales
+        $fermetureSpeciale = $this->fermeturesSpeciales()
+            ->where('date_debut', '<=', now()->toDateString())
+            ->where('date_fin', '>=', now()->toDateString())
+            ->exists();
+
+        if ($fermetureSpeciale) {
+            return false;
+        }
+
+        return $this->horaires()
+            ->where('jour_semaine', $jour)
+            ->where('est_ferme', false)
+            ->where('heure_ouverture', '<=', $now)
+            ->where('heure_fermeture', '>=', $now)
+            ->exists();
+    }
+
+    public function recalculerNote(): void
+    {
+        $note = $this->avis()->where('est_visible', true)->avg('note_globale') ?? 0;
+        $total = $this->avis()->where('est_visible', true)->count();
+
+        $this->update([
+            'note' => round($note, 2),
+            'total_avis' => $total,
+        ]);
+    }
+}
+```
+
+### 4.2 `app/Models/HoraireRestaurant.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class HoraireRestaurant extends BaseModel
+{
+    protected $table = 'horaires_restaurant';
+
+    protected $fillable = [
+        'restaurant_id',
+        'jour_semaine',
+        'heure_ouverture',
+        'heure_fermeture',
+        'est_ferme',
+    ];
+
+    protected $casts = [
+        'est_ferme' => 'boolean',
+    ];
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function getJourNomAttribute(): string
+    {
+        $jours = [
+            0 => 'Dimanche',
+            1 => 'Lundi',
+            2 => 'Mardi',
+            3 => 'Mercredi',
+            4 => 'Jeudi',
+            5 => 'Vendredi',
+            6 => 'Samedi',
+        ];
+
+        return $jours[$this->jour_semaine] ?? '';
+    }
+}
+```
+
+### 4.3 `app/Models/FermetureSpecialeRestaurant.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class FermetureSpecialeRestaurant extends BaseModel
+{
+    protected $table = 'fermetures_speciales_restaurant';
+
+    protected $fillable = [
+        'restaurant_id',
+        'titre',
+        'raison',
+        'date_debut',
+        'date_fin',
+    ];
+
+    protected $casts = [
+        'date_debut' => 'date',
+        'date_fin' => 'date',
+    ];
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+}
+```
+
+### 4.4 `app/Models/SalleRestaurant.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+class SalleRestaurant extends BaseModel
+{
+    protected $table = 'salles_restaurant';
+
+    protected $fillable = [
+        'restaurant_id',
+        'nom',
+        'description',
+        'capacite',
+        'est_privee',
+        'nb_invites_min',
+        'nb_invites_max',
+    ];
+
+    protected $casts = [
+        'est_privee' => 'boolean',
+    ];
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function tables(): HasMany
+    {
+        return $this->hasMany(TableRestaurant::class, 'salle_id');
+    }
+}
+```
+
+### 4.5 `app/Models/TableRestaurant.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class TableRestaurant extends BaseModel
+{
+    protected $table = 'tables_restaurant';
+
+    protected $fillable = [
+        'restaurant_id',
+        'salle_id',
+        'numero_table',
+        'places',
+        'qr_code',
+        'est_active',
+    ];
+
+    protected $casts = [
+        'est_active' => 'boolean',
+    ];
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function salle(): BelongsTo
+    {
+        return $this->belongsTo(SalleRestaurant::class, 'salle_id');
+    }
+}
+```
+
+### 4.6 `app/Models/ImageRestaurant.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use App\Traits\HasTranslations;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class ImageRestaurant extends BaseModel
+{
+    use HasTranslations;
+
+    protected $table = 'images_restaurant';
+
+    public array $translatable = ['texte_alternatif'];
+
+    protected $fillable = [
+        'restaurant_id',
+        'chemin_image',
+        'texte_alternatif',
+        'ordre_tri',
+    ];
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+}
+```
+
+### 4.7 `app/Models/ServiceRestaurant.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class ServiceRestaurant extends BaseModel
+{
+    protected $table = 'services_restaurant';
+
+    protected $fillable = [
+        'restaurant_id',
+        'service',
+        'icone',
+    ];
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+}
+```
+
+---
+
+## 📋 5. MODULE MENU & PRODUITS (12 modèles)
+
+### 5.1 `app/Models/Categorie.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use App\Traits\HasTranslations;
+use App\Traits\HasSlug;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+class Categorie extends BaseModel
+{
+    use HasTranslations, HasSlug;
+
+    protected $table = 'categories';
+
+    public array $translatable = ['nom', 'description'];
+
+    protected $fillable = [
+        'restaurant_id',
+        'nom',
+        'slug',
+        'description',
+        'icone',
+        'image',
+        'ordre_tri',
+        'est_active',
+    ];
+
+    protected $casts = [
+        'est_active' => 'boolean',
+    ];
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function sousCategories(): HasMany
+    {
+        return $this->hasMany(SousCategorie::class, 'categorie_id');
+    }
+
+    public function produits(): HasMany
+    {
+        return $this->hasMany(Produit::class, 'categorie_id');
+    }
+
+    public function scopeActives($query)
+    {
+        return $query->where('est_active', true)->orderBy('ordre_tri');
+    }
+}
+```
+
+### 5.2 `app/Models/SousCategorie.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use App\Traits\HasTranslations;
+use App\Traits\HasSlug;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+class SousCategorie extends BaseModel
+{
+    use HasTranslations, HasSlug;
+
+    protected $table = 'sous_categories';
+
+    public array $translatable = ['nom', 'description'];
+
+    protected $fillable = [
+        'categorie_id',
+        'nom',
+        'slug',
+        'description',
+        'ordre_tri',
+        'est_active',
+    ];
+
+    protected $casts = [
+        'est_active' => 'boolean',
+    ];
+
+    public function categorie(): BelongsTo
+    {
+        return $this->belongsTo(Categorie::class, 'categorie_id');
+    }
+
+    public function produits(): HasMany
+    {
+        return $this->hasMany(Produit::class, 'sous_categorie_id');
+    }
+}
+```
+
+### 5.3 `app/Models/Produit.php` ⭐ (Modèle central)
+
+```php
+<?php
+
+namespace App\Models;
+
+use App\Traits\HasTranslations;
+use App\Traits\HasSlug;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+class Produit extends SoftDeleteModel
+{
+    use HasTranslations, HasSlug;
+
+    protected $table = 'produits';
+
+    public array $translatable = ['nom', 'description'];
+
+    protected $fillable = [
+        'categorie_id',
+        'sous_categorie_id',
+        'nom',
+        'slug',
+        'description',
+        'prix_base',
+        'prix_promo',
+        'taux_tva',
+        'sku',
+        'code_barre',
+        'calories',
+        'temps_preparation',
+        'est_vegetarien',
+        'est_vegan',
+        'est_sans_gluten',
+        'est_halal',
+        'est_epice',
+        'est_en_avant',
+        'est_nouveau',
+        'est_disponible',
+        'quantite_stock',
+        'ordre_tri',
+    ];
+
+    protected $casts = [
+        'prix_base' => 'decimal:2',
+        'prix_promo' => 'decimal:2',
+        'taux_tva' => 'decimal:2',
+        'calories' => 'integer',
+        'temps_preparation' => 'integer',
+        'est_vegetarien' => 'boolean',
+        'est_vegan' => 'boolean',
+        'est_sans_gluten' => 'boolean',
+        'est_halal' => 'boolean',
+        'est_epice' => 'boolean',
+        'est_en_avant' => 'boolean',
+        'est_nouveau' => 'boolean',
+        'est_disponible' => 'boolean',
+        'quantite_stock' => 'integer',
+    ];
+
+    // ===== RELATIONS =====
+
+    public function categorie(): BelongsTo
+    {
+        return $this->belongsTo(Categorie::class, 'categorie_id');
+    }
+
+    public function sousCategorie(): BelongsTo
+    {
+        return $this->belongsTo(SousCategorie::class, 'sous_categorie_id');
+    }
+
+    public function images(): HasMany
+    {
+        return $this->hasMany(ImageProduit::class, 'produit_id');
+    }
+
+    public function imagePrincipale()
+    {
+        return $this->hasOne(ImageProduit::class, 'produit_id')->where('est_principale', true);
+    }
+
+    public function variantes(): HasMany
+    {
+        return $this->hasMany(VarianteProduit::class, 'produit_id');
+    }
+
+    public function supplements(): HasMany
+    {
+        return $this->hasMany(SupplementProduit::class, 'produit_id');
+    }
+
+    public function allergenes(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            Allergene::class,
+            'produit_allergenes',
+            'produit_id',
+            'allergene_id'
+        );
+    }
+
+    public function restaurants(): BelongsToMany
+    {
+        return $this->belongsToMany(Restaurant::class, 'produit_restaurant')
+            ->withPivot('prix', 'est_disponible')
+            ->withTimestamps();
+    }
+
+    public function tags(): HasMany
+    {
+        return $this->hasMany(TagProduit::class, 'produit_id');
+    }
+
+    // ===== SCOPES =====
+
+    public function scopeDisponibles($query)
+    {
+        return $query->where('est_disponible', true);
+    }
+
+    public function scopeEnAvant($query)
+    {
+        return $query->where('est_en_avant', true);
+    }
+
+    public function scopeNouveaux($query)
+    {
+        return $query->where('est_nouveau', true);
+    }
+
+    public function scopeVegetariens($query)
+    {
+        return $query->where('est_vegetarien', true);
+    }
+
+    public function scopeVegans($query)
+    {
+        return $query->where('est_vegan', true);
+    }
+
+    public function scopeSansGluten($query)
+    {
+        return $query->where('est_sans_gluten', true);
+    }
+
+    public function scopeHalal($query)
+    {
+        return $query->where('est_halal', true);
+    }
+
+    public function scopeDansRestaurant($query, $restaurantId)
+    {
+        return $query->whereHas('restaurants', function($q) use ($restaurantId) {
+            $q->where('restaurants.id', $restaurantId)
+              ->where('produit_restaurant.est_disponible', true);
+        });
+    }
+
+    // ===== MÉTHODES =====
+
+    public function getPrixActuelAttribute(): float
+    {
+        return $this->prix_promo ?? $this->prix_base;
+    }
+
+    public function estEnPromotion(): bool
+    {
+        return $this->prix_promo !== null && $this->prix_promo < $this->prix_base;
+    }
+
+    public function getPrixPourRestaurant($restaurantId): ?float
+    {
+        $pivot = $this->restaurants()->where('restaurants.id', $restaurantId)->first()?->pivot;
+        return $pivot?->prix;
+    }
+
+    public function estEnStock(): bool
+    {
+        if ($this->quantite_stock === null) {
+            return true; // Stock illimité
+        }
+        return $this->quantite_stock > 0;
+    }
+
+    public function decrementerStock(int $quantite = 1): bool
+    {
+        if (!$this->estEnStock() || $this->quantite_stock < $quantite) {
+            return false;
+        }
+
+        $this->decrement('quantite_stock', $quantite);
+        return true;
+    }
+}
+```
+
+### 5.4 `app/Models/ImageProduit.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use App\Traits\HasTranslations;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class ImageProduit extends BaseModel
+{
+    use HasTranslations;
+
+    protected $table = 'images_produit';
+
+    public array $translatable = ['texte_alternatif'];
+
+    protected $fillable = [
+        'produit_id',
+        'chemin_image',
+        'texte_alternatif',
+        'est_principale',
+        'ordre_tri',
+    ];
+
+    protected $casts = [
+        'est_principale' => 'boolean',
+    ];
+
+    public function produit(): BelongsTo
+    {
+        return $this->belongsTo(Produit::class, 'produit_id');
+    }
+}
+```
+
+### 5.5 `app/Models/VarianteProduit.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use App\Traits\HasTranslations;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class VarianteProduit extends BaseModel
+{
+    use HasTranslations;
+
+    protected $table = 'variantes_produit';
+
+    public array $translatable = ['nom'];
+
+    protected $fillable = [
+        'produit_id',
+        'nom',
+        'modificateur_prix',
+        'ordre_tri',
+        'est_active',
+    ];
+
+    protected $casts = [
+        'modificateur_prix' => 'decimal:2',
+        'est_active' => 'boolean',
+    ];
+
+    public function produit(): BelongsTo
+    {
+        return $this->belongsTo(Produit::class, 'produit_id');
+    }
+
+    public function getPrixFinalAttribute(): float
+    {
+        return $this->produit->prix_base + $this->modificateur_prix;
+    }
+}
+```
+
+### 5.6 `app/Models/SupplementProduit.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use App\Traits\HasTranslations;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class SupplementProduit extends BaseModel
+{
+    use HasTranslations;
+
+    protected $table = 'supplements_produit';
+
+    public array $translatable = ['nom'];
+
+    protected $fillable = [
+        'produit_id',
+        'nom',
+        'prix',
+        'est_obligatoire',
+        'nb_choix_max',
+        'ordre_tri',
+        'est_actif',
+    ];
+
+    protected $casts = [
+        'prix' => 'decimal:2',
+        'est_obligatoire' => 'boolean',
+        'est_actif' => 'boolean',
+    ];
+
+    public function produit(): BelongsTo
+    {
+        return $this->belongsTo(Produit::class, 'produit_id');
+    }
+}
+```
+
+### 5.7 `app/Models/Allergene.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use App\Traits\HasTranslations;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+
+class Allergene extends BaseModel
+{
+    use HasTranslations;
+
+    protected $table = 'allergenes';
+
+    public array $translatable = ['nom'];
+
+    protected $fillable = ['nom', 'icone'];
+
+    public function produits(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            Produit::class,
+            'produit_allergenes',
+            'allergene_id',
+            'produit_id'
+        );
+    }
+}
+```
+
+### 5.8 `app/Models/MenuDuJour.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use App\Traits\HasTranslations;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+
+class MenuDuJour extends BaseModel
+{
+    use HasTranslations;
+
+    protected $table = 'menus_du_jour';
+
+    public array $translatable = ['titre', 'description'];
+
+    protected $fillable = [
+        'restaurant_id',
+        'date',
+        'titre',
+        'description',
+        'prix',
+        'est_actif',
+    ];
+
+    protected $casts = [
+        'date' => 'date',
+        'prix' => 'decimal:2',
+        'est_actif' => 'boolean',
+    ];
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function produits(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            Produit::class,
+            'menu_du_jour_produits',
+            'menu_du_jour_id',
+            'produit_id'
+        );
+    }
+
+    public function scopeDateAujourdhui($query)
+    {
+        return $query->where('date', now()->toDateString());
+    }
+
+    public function scopeActifs($query)
+    {
+        return $query->where('est_actif', true);
+    }
+}
+```
+
+### 5.9 `app/Models/TagProduit.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class TagProduit extends BaseModel
+{
+    protected $table = 'tags_produit';
+
+    protected $fillable = ['produit_id', 'tag'];
+
+    public function produit(): BelongsTo
+    {
+        return $this->belongsTo(Produit::class, 'produit_id');
+    }
+}
+```
+
+---
+
+## 🛒 6. MODULE COMMANDES (8 modèles)
+
+### 6.1 `app/Models/Commande.php` ⭐ (Modèle critique)
+
+```php
+<?php
+
+namespace App\Models;
+
+use App\Enums\StatutCommande;
+use App\Enums\TypeCommande;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Str;
+
+class Commande extends SoftDeleteModel
+{
+    protected $table = 'commandes';
+
+    protected $fillable = [
+        'numero',
+        'client_id',
+        'restaurant_id',
+        'livreur_id',
+        'adresse_livraison_id',
+        'table_id',
+        'type_commande',
+        'statut',
+        'sous_total',
+        'montant_tva',
+        'frais_livraison',
+        'montant_reduction',
+        'montant_total',
+        'montant_paye',
+        'code_promo_id',
+        'notes_client',
+        'notes_restaurant',
+        'temps_preparation_estime',
+        'heure_livraison_prevue',
+        'heure_livraison_effective',
+        'est_notee',
+    ];
+
+    protected $casts = [
+        'type_commande' => TypeCommande::class,
+        'statut' => StatutCommande::class,
+        'sous_total' => 'decimal:2',
+        'montant_tva' => 'decimal:2',
+        'frais_livraison' => 'decimal:2',
+        'montant_reduction' => 'decimal:2',
+        'montant_total' => 'decimal:2',
+        'montant_paye' => 'decimal:2',
+        'temps_preparation_estime' => 'integer',
+        'heure_livraison_prevue' => 'datetime',
+        'heure_livraison_effective' => 'datetime',
+        'est_notee' => 'boolean',
+    ];
+
+    // ===== BOOT : Génération du numéro unique =====
+
+    protected static function booted()
+    {
+        parent::booted();
+
+        static::creating(function ($commande) {
+            if (empty($commande->numero)) {
+                $date = now()->format('Ymd');
+                $count = self::whereDate('cree_le', today())->count() + 1;
+                $commande->numero = 'CMD-' . $date . '-' . str_pad($count, 4, '0', STR_PAD_LEFT);
+            }
+        });
+    }
+
+    // ===== RELATIONS =====
+
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(ProfilClient::class, 'client_id');
+    }
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function livreur(): BelongsTo
+    {
+        return $this->belongsTo(ProfilLivreur::class, 'livreur_id');
+    }
+
+    public function adresseLivraison(): BelongsTo
+    {
+        return $this->belongsTo(Adresse::class, 'adresse_livraison_id');
+    }
+
+    public function table(): BelongsTo
+    {
+        return $this->belongsTo(TableRestaurant::class, 'table_id');
+    }
+
+    public function lignes(): HasMany
+    {
+        return $this->hasMany(LigneCommande::class, 'commande_id');
+    }
+
+    public function historiqueStatuts(): HasMany
+    {
+        return $this->hasMany(HistoriqueStatutCommande::class, 'commande_id');
+    }
+
+    public function paiement(): HasOne
+    {
+        return $this->hasOne(Paiement::class, 'commande_id');
+    }
+
+    public function livraison(): HasOne
+    {
+        return $this->hasOne(Livraison::class, 'commande_id');
+    }
+
+    public function avis(): HasOne
+    {
+        return $this->hasOne(Avi::class, 'commande_id');
+    }
+
+    public function codePromo(): BelongsTo
+    {
+        return $this->belongsTo(CodePromo::class, 'code_promo_id');
+    }
+
+    public function facture(): HasOne
+    {
+        return $this->hasOne(Facture::class, 'commande_id');
+    }
+
+    // ===== SCOPES =====
+
+    public function scopeEnCours($query)
+    {
+        return $query->whereIn('statut', [
+            StatutCommande::EN_ATTENTE,
+            StatutCommande::CONFIRMEE,
+            StatutCommande::EN_PREPARATION,
+            StatutCommande::PRETE,
+            StatutCommande::EN_LIVRAISON,
+        ]);
+    }
+
+    public function scopeStatut($query, StatutCommande $statut)
+    {
+        return $query->where('statut', $statut);
+    }
+
+    public function scopeDuJour($query)
+    {
+        return $query->whereDate('cree_le', today());
+    }
+
+    public function scopeDuClient($query, $clientId)
+    {
+        return $query->where('client_id', $clientId);
+    }
+
+    public function scopeDuRestaurant($query, $restaurantId)
+    {
+        return $query->where('restaurant_id', $restaurantId);
+    }
+
+    // ===== MÉTHODES =====
+
+    public function calculerTotaux(): self
+    {
+        $sousTotal = $this->lignes->sum(fn($ligne) => $ligne->prix_total_ligne);
+        $tauxTva = $this->restaurant->taux_tva / 100;
+        $montantTva = $sousTotal * $tauxTva / (1 + $tauxTva);
+
+        $this->update([
+            'sous_total' => $sousTotal,
+            'montant_tva' => round($montantTva, 2),
+            'montant_total' => $sousTotal + $this->frais_livraison - $this->montant_reduction,
+        ]);
+
+        return $this;
+    }
+
+    public function changerStatut(StatutCommande $nouveauStatut, ?string $commentaire = null, $modifiePar = null): void
+    {
+        $ancienStatut = $this->statut;
+        $this->update(['statut' => $nouveauStatut]);
+
+        $this->historiqueStatuts()->create([
+            'statut' => $nouveauStatut->value,
+            'commentaire' => $commentaire,
+            'modifie_par_id' => $modifiePar?->id,
+        ]);
+
+        // Actions spécifiques selon le statut
+        if ($nouveauStatut === StatutCommande::LIVREE) {
+            $this->update(['heure_livraison_effective' => now()]);
+        }
+
+        if ($nouveauStatut === StatutCommande::TERMINEE) {
+            $this->client?->ajouterPointsFidelite(
+                (int) floor($this->montant_total / 100),
+                "Points gagnés sur la commande #{$this->numero}"
+            );
+        }
+    }
+
+    public function estAnnulable(): bool
+    {
+        return in_array($this->statut, [
+            StatutCommande::EN_ATTENTE,
+            StatutCommande::CONFIRMEE,
+        ]);
+    }
+}
+```
+
+### 6.2 `app/Models/LigneCommande.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use App\Traits\HasTranslations;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+class LigneCommande extends BaseModel
+{
+    use HasTranslations;
+
+    protected $table = 'lignes_commande';
+
+    public array $translatable = ['nom_produit'];
+
+    protected $fillable = [
+        'commande_id',
+        'produit_id',
+        'variante_id',
+        'nom_produit',
+        'quantite',
+        'prix_unitaire',
+        'modificateur_prix',
+        'prix_total_ligne',
+        'notes',
+        'est_terminee',
+    ];
+
+    protected $casts = [
+        'quantite' => 'integer',
+        'prix_unitaire' => 'decimal:2',
+        'modificateur_prix' => 'decimal:2',
+        'prix_total_ligne' => 'decimal:2',
+        'est_terminee' => 'boolean',
+    ];
+
+    public function commande(): BelongsTo
+    {
+        return $this->belongsTo(Commande::class, 'commande_id');
+    }
+
+    public function produit(): BelongsTo
+    {
+        return $this->belongsTo(Produit::class, 'produit_id');
+    }
+
+    public function variante(): BelongsTo
+    {
+        return $this->belongsTo(VarianteProduit::class, 'variante_id');
+    }
+
+    public function options(): HasMany
+    {
+        return $this->hasMany(OptionLigneCommande::class, 'ligne_commande_id');
+    }
+
+    // ===== BOOT : Calcul automatique du total =====
+
+    protected static function booted()
+    {
+        static::creating(function ($ligne) {
+            $ligne->prix_total_ligne = self::calculerTotalLigne($ligne);
+        });
+
+        static::updating(function ($ligne) {
+            $ligne->prix_total_ligne = self::calculerTotalLigne($ligne);
+        });
+    }
+
+    private static function calculerTotalLigne($ligne): float
+    {
+        $prixUnitaireFinal = $ligne->prix_unitaire + $ligne->modificateur_prix;
+        return $prixUnitaireFinal * $ligne->quantite;
+    }
+}
+```
+
+### 6.3 `app/Models/OptionLigneCommande.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use App\Traits\HasTranslations;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class OptionLigneCommande extends BaseModel
+{
+    use HasTranslations;
+
+    protected $table = 'options_ligne_commande';
+
+    public array $translatable = ['nom_supplement'];
+
+    protected $fillable = [
+        'ligne_commande_id',
+        'supplement_id',
+        'nom_supplement',
+        'prix',
+    ];
+
+    protected $casts = [
+        'prix' => 'decimal:2',
+    ];
+
+    public function ligneCommande(): BelongsTo
+    {
+        return $this->belongsTo(LigneCommande::class, 'ligne_commande_id');
+    }
+
+    public function supplement(): BelongsTo
+    {
+        return $this->belongsTo(SupplementProduit::class, 'supplement_id');
+    }
+}
+```
+
+### 6.4 `app/Models/HistoriqueStatutCommande.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class HistoriqueStatutCommande extends BaseModel
+{
+    protected $table = 'historique_statuts_commande';
+
+    public $timestamps = false;
+
+    protected $fillable = [
+        'commande_id',
+        'statut',
+        'modifie_par_id',
+        'commentaire',
+        'cree_le',
+    ];
+
+    protected $casts = [
+        'cree_le' => 'datetime',
+    ];
+
+    public function commande(): BelongsTo
+    {
+        return $this->belongsTo(Commande::class, 'commande_id');
+    }
+
+    public function modifiePar(): BelongsTo
+    {
+        return $this->belongsTo(Utilisateur::class, 'modifie_par_id');
+    }
+}
+```
+
+### 6.5 `app/Models/Panier.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+class Panier extends BaseModel
+{
+    protected $table = 'paniers';
+
+    protected $fillable = [
+        'client_id',
+        'restaurant_id',
+        'session_id',
+        'sous_total',
+        'montant_total',
+        'code_promo_id',
+        'derniere_activite_le',
+    ];
+
+    protected $casts = [
+        'sous_total' => 'decimal:2',
+        'montant_total' => 'decimal:2',
+        'derniere_activite_le' => 'datetime',
+    ];
+
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(ProfilClient::class, 'client_id');
+    }
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function lignes(): HasMany
+    {
+        return $this->hasMany(PanierLigne::class, 'panier_id');
+    }
+
+    public function codePromo(): BelongsTo
+    {
+        return $this->belongsTo(CodePromo::class, 'code_promo_id');
+    }
+
+    public function recalculerTotal(): self
+    {
+        $this->update([
+            'sous_total' => $this->lignes->sum(fn($l) => $l->prix_unitaire * $l->quantite),
+            'montant_total' => $this->lignes->sum(fn($l) => $l->prix_unitaire * $l->quantite),
+            'derniere_activite_le' => now(),
+        ]);
+
+        return $this;
+    }
+}
+```
+
+### 6.6 `app/Models/PanierLigne.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class PanierLigne extends BaseModel
+{
+    protected $table = 'panier_lignes';
+
+    protected $fillable = [
+        'panier_id',
+        'produit_id',
+        'variante_id',
+        'quantite',
+        'prix_unitaire',
+        'options',
+        'notes',
+    ];
+
+    protected $casts = [
+        'quantite' => 'integer',
+        'prix_unitaire' => 'decimal:2',
+        'options' => 'array',
+    ];
+
+    public function panier(): BelongsTo
+    {
+        return $this->belongsTo(Panier::class, 'panier_id');
+    }
+
+    public function produit(): BelongsTo
+    {
+        return $this->belongsTo(Produit::class, 'produit_id');
+    }
+
+    public function variante(): BelongsTo
+    {
+        return $this->belongsTo(VarianteProduit::class, 'variante_id');
+    }
+}
+```
+
+### 6.7 `app/Models/FavorisClient.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class FavorisClient extends BaseModel
+{
+    protected $table = 'favoris_client';
+
+    public $timestamps = false;
+
+    protected $fillable = ['client_id', 'produit_id', 'cree_le'];
+
+    protected $casts = ['cree_le' => 'datetime'];
+
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(ProfilClient::class, 'client_id');
+    }
+
+    public function produit(): BelongsTo
+    {
+        return $this->belongsTo(Produit::class, 'produit_id');
+    }
+}
+```
+
+---
+
+## 💰 7. MODULE PAIEMENTS (Modèles clés)
+
+### 7.1 `app/Models/Paiement.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use App\Enums\MethodePaiement;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Str;
+
+class Paiement extends BaseModel
+{
+    protected $table = 'paiements';
+
+    protected $fillable = [
+        'commande_id',
+        'client_id',
+        'reference_transaction',
+        'reference_prestataire',
+        'methode_paiement',
+        'prestataire',
+        'montant',
+        'devise',
+        'statut',
+        'telephone_mobile_money',
+        'email_paypal',
+        'metadata',
+        'heure_paiement',
+    ];
+
+    protected $casts = [
+        'methode_paiement' => MethodePaiement::class,
+        'montant' => 'decimal:2',
+        'metadata' => 'array',
+        'heure_paiement' => 'datetime',
+    ];
+
+    protected static function booted()
+    {
+        parent::booted();
+
+        static::creating(function ($paiement) {
+            if (empty($paiement->reference_transaction)) {
+                $paiement->reference_transaction = 'PAY-' . strtoupper(Str::random(16));
+            }
+        });
+    }
+
+    public function commande(): BelongsTo
+    {
+        return $this->belongsTo(Commande::class, 'commande_id');
+    }
+
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(ProfilClient::class, 'client_id');
+    }
+
+    public function transactions(): HasMany
+    {
+        return $this->hasMany(TransactionPaiement::class, 'paiement_id');
+    }
+
+    public function remboursements(): HasMany
+    {
+        return $this->hasMany(Remboursement::class, 'paiement_id');
+    }
+
+    public function estReussi(): bool
+    {
+        return $this->statut === 'reussi';
+    }
+}
+```
+
+### 7.2 `app/Models/Portefeuille.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+class Portefeuille extends BaseModel
+{
+    protected $table = 'portefeuilles';
+
+    protected $fillable = ['client_id', 'solde', 'devise'];
+
+    protected $casts = ['solde' => 'decimal:2'];
+
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(ProfilClient::class, 'client_id');
+    }
+
+    public function transactions(): HasMany
+    {
+        return $this->hasMany(TransactionPortefeuille::class, 'portefeuille_id');
+    }
+
+    public function crediter(float $montant, string $description = null): void
+    {
+        $ancienSolde = $this->solde;
+        $this->increment('solde', $montant);
+
+        $this->transactions()->create([
+            'type_transaction' => 'credit',
+            'montant' => $montant,
+            'solde_avant' => $ancienSolde,
+            'solde_apres' => $this->solde,
+            'description' => $description,
+        ]);
+    }
+
+    public function debiter(float $montant, string $description = null): bool
+    {
+        if ($this->solde < $montant) {
+            return false;
+        }
+
+        $ancienSolde = $this->solde;
+        $this->decrement('solde', $montant);
+
+        $this->transactions()->create([
+            'type_transaction' => 'debit',
+            'montant' => -$montant,
+            'solde_avant' => $ancienSolde,
+            'solde_apres' => $this->solde,
+            'description' => $description,
+        ]);
+
+        return true;
+    }
+}
+```
+
+# 🎯 MODÈLES ELOQUENT - SUITE (Modules 5 à 12)
+
+Voici la suite des modèles Eloquent pour compléter ton application.
+
+---
+
+## 📅 8. MODULE RÉSERVATIONS (4 modèles)
+
+### 8.1 `app/Models/Reservation.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
+
+class Reservation extends SoftDeleteModel
+{
+    protected $table = 'reservations';
+
+    protected $fillable = [
+        'numero',
+        'client_id',
+        'restaurant_id',
+        'table_id',
+        'salle_id',
+        'date_reservation',
+        'heure_reservation',
+        'duree_minutes',
+        'nombre_personnes',
+        'statut',
+        'nom_client',
+        'telephone_client',
+        'email_client',
+        'occasion_speciale',
+        'notes',
+        'montant_depense',
+        'est_no_show',
+    ];
+
+    protected $casts = [
+        'date_reservation' => 'date',
+        'duree_minutes' => 'integer',
+        'nombre_personnes' => 'integer',
+        'montant_depense' => 'decimal:2',
+        'est_no_show' => 'boolean',
+    ];
+
+    protected static function booted()
+    {
+        parent::booted();
+
+        static::creating(function ($reservation) {
+            if (empty($reservation->numero)) {
+                $date = now()->format('Ymd');
+                $count = self::whereDate('cree_le', today())->count() + 1;
+                $reservation->numero = 'RES-' . $date . '-' . str_pad($count, 4, '0', STR_PAD_LEFT);
+            }
+        });
+    }
+
+    // ===== RELATIONS =====
+
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(ProfilClient::class, 'client_id');
+    }
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function table(): BelongsTo
+    {
+        return $this->belongsTo(TableRestaurant::class, 'table_id');
+    }
+
+    public function salle(): BelongsTo
+    {
+        return $this->belongsTo(SalleRestaurant::class, 'salle_id');
+    }
+
+    public function historiqueStatuts(): HasMany
+    {
+        return $this->hasMany(HistoriqueStatutReservation::class, 'reservation_id');
+    }
+
+    // ===== SCOPES =====
+
+    public function scopeEnAttente($query)
+    {
+        return $query->where('statut', 'en_attente');
+    }
+
+    public function scopeConfirmees($query)
+    {
+        return $query->where('statut', 'confirmee');
+    }
+
+    public function scopeDateAujourdhui($query)
+    {
+        return $query->whereDate('date_reservation', today());
+    }
+
+    public function scopeDateFuture($query)
+    {
+        return $query->where('date_reservation', '>=', today());
+    }
+
+    public function scopeDuRestaurant($query, $restaurantId)
+    {
+        return $query->where('restaurant_id', $restaurantId);
+    }
+
+    // ===== MÉTHODES =====
+
+    public function changerStatut(string $nouveauStatut, ?string $commentaire = null, $modifiePar = null): void
+    {
+        $this->update(['statut' => $nouveauStatut]);
+
+        $this->historiqueStatuts()->create([
+            'statut' => $nouveauStatut,
+            'commentaire' => $commentaire,
+            'modifie_par_id' => $modifiePar?->id,
+        ]);
+    }
+
+    public function getDateTimeCompleteAttribute(): \Carbon\Carbon
+    {
+        return \Carbon::parse($this->date_reservation->format('Y-m-d') . ' ' . $this->heure_reservation);
+    }
+
+    public function estFuture(): bool
+    {
+        return $this->date_time_complete->isFuture();
+    }
+
+    public function estPassee(): bool
+    {
+        return $this->date_time_complete->isPast();
+    }
+}
+```
+
+### 8.2 `app/Models/HistoriqueStatutReservation.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class HistoriqueStatutReservation extends BaseModel
+{
+    protected $table = 'historique_statuts_reservation';
+
+    public $timestamps = false;
+
+    protected $fillable = [
+        'reservation_id',
+        'statut',
+        'modifie_par_id',
+        'commentaire',
+        'cree_le',
+    ];
+
+    protected $casts = [
+        'cree_le' => 'datetime',
+    ];
+
+    public function reservation(): BelongsTo
+    {
+        return $this->belongsTo(Reservation::class, 'reservation_id');
+    }
+
+    public function modifiePar(): BelongsTo
+    {
+        return $this->belongsTo(Utilisateur::class, 'modifie_par_id');
+    }
+}
+```
+
+### 8.3 `app/Models/ListeAttente.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class ListeAttente extends BaseModel
+{
+    protected $table = 'listes_attente';
+
+    protected $fillable = [
+        'restaurant_id',
+        'client_id',
+        'nombre_personnes',
+        'date_souhaitee',
+        'heure_souhaitee',
+        'position',
+        'statut',
+        'telephone',
+    ];
+
+    protected $casts = [
+        'nombre_personnes' => 'integer',
+        'date_souhaitee' => 'date',
+        'position' => 'integer',
+    ];
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(ProfilClient::class, 'client_id');
+    }
+
+    public function scopeEnAttente($query)
+    {
+        return $query->where('statut', 'en_attente')->orderBy('position');
+    }
+
+    public function scopeDuRestaurant($query, $restaurantId)
+    {
+        return $query->where('restaurant_id', $restaurantId);
+    }
+}
+```
+
+### 8.4 `app/Models/Privatisation.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class Privatisation extends BaseModel
+{
+    protected $table = 'privatisations';
+
+    protected $fillable = [
+        'restaurant_id',
+        'salle_id',
+        'client_id',
+        'nom_organisateur',
+        'email_organisateur',
+        'telephone_organisateur',
+        'type_evenement',
+        'date_debut',
+        'date_fin',
+        'nombre_invites',
+        'budget_estime',
+        'statut',
+        'message',
+    ];
+
+    protected $casts = [
+        'date_debut' => 'datetime',
+        'date_fin' => 'datetime',
+        'nombre_invites' => 'integer',
+        'budget_estime' => 'decimal:2',
+    ];
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function salle(): BelongsTo
+    {
+        return $this->belongsTo(SalleRestaurant::class, 'salle_id');
+    }
+
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(ProfilClient::class, 'client_id');
+    }
+
+    public function scopeDemandes($query)
+    {
+        return $query->where('statut', 'demande');
+    }
+
+    public function scopeDuRestaurant($query, $restaurantId)
+    {
+        return $query->where('restaurant_id', $restaurantId);
+    }
+}
+```
+
+---
+
+## 🚚 9. MODULE LIVRAISON (6 modèles)
+
+### 9.1 `app/Models/ZoneLivraison.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class ZoneLivraison extends BaseModel
+{
+    protected $table = 'zones_livraison';
+
+    protected $fillable = [
+        'restaurant_id',
+        'nom',
+        'polygone_geojson',
+        'frais_livraison',
+        'temps_livraison_estime',
+        'est_active',
+    ];
+
+    protected $casts = [
+        'polygone_geojson' => 'array',
+        'frais_livraison' => 'decimal:2',
+        'temps_livraison_estime' => 'integer',
+        'est_active' => 'boolean',
+    ];
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function livraisons()
+    {
+        return $this->hasMany(Livraison::class, 'zone_id');
+    }
+
+    public function scopeActives($query)
+    {
+        return $query->where('est_active', true);
+    }
+
+    /**
+     * Vérifie si des coordonnées sont dans la zone
+     */
+    public function contientPoint(float $latitude, float $longitude): bool
+    {
+        $polygone = $this->polygone_geojson;
+
+        if (!$polygone || !isset($polygone['coordinates'])) {
+            return false;
+        }
+
+        // Algorithme point-in-polygon (Ray casting)
+        $points = $polygone['coordinates'][0];
+        $intersections = 0;
+        $count = count($points);
+
+        for ($i = 0; $i < $count; $i++) {
+            $j = ($i + 1) % $count;
+            $xi = $points[$i][1]; $yi = $points[$i][0];
+            $xj = $points[$j][1]; $yj = $points[$j][0];
+
+            $intersect = (($yi > $longitude) != ($yj > $longitude))
+                && ($latitude < ($xj - $xi) * ($longitude - $yi) / ($yj - $yi + 0.0000001) + $xi);
+
+            if ($intersect) $intersections++;
+        }
+
+        return ($intersections % 2) === 1;
+    }
+}
+```
+
+### 9.2 `app/Models/Livraison.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+
+class Livraison extends BaseModel
+{
+    protected $table = 'livraisons';
+
+    protected $fillable = [
+        'commande_id',
+        'livreur_id',
+        'zone_id',
+        'statut',
+        'distance_km',
+        'duree_estimee',
+        'heure_prise_en_charge',
+        'heure_livraison',
+        'pourboire',
+        'commission_livreur',
+    ];
+
+    protected $casts = [
+        'distance_km' => 'decimal:2',
+        'duree_estimee' => 'integer',
+        'heure_prise_en_charge' => 'datetime',
+        'heure_livraison' => 'datetime',
+        'pourboire' => 'decimal:2',
+        'commission_livreur' => 'decimal:2',
+    ];
+
+    // ===== RELATIONS =====
+
+    public function commande(): BelongsTo
+    {
+        return $this->belongsTo(Commande::class, 'commande_id');
+    }
+
+    public function livreur(): BelongsTo
+    {
+        return $this->belongsTo(ProfilLivreur::class, 'livreur_id');
+    }
+
+    public function zone(): BelongsTo
+    {
+        return $this->belongsTo(ZoneLivraison::class, 'zone_id');
+    }
+
+    public function suivis(): HasMany
+    {
+        return $this->hasMany(SuiviLivraison::class, 'livraison_id');
+    }
+
+    public function preuve(): HasOne
+    {
+        return $this->hasOne(PreuveLivraison::class, 'livraison_id');
+    }
+
+    public function evaluation(): HasOne
+    {
+        return $this->hasOne(EvaluationLivreur::class, 'livraison_id');
+    }
+
+    // ===== SCOPES =====
+
+    public function scopeEnAttente($query)
+    {
+        return $query->where('statut', 'en_attente_livreur');
+    }
+
+    public function scopeEnCours($query)
+    {
+        return $query->whereIn('statut', [
+            'assignee', 'en_route_restaurant', 'recuperee', 'en_livraison'
+        ]);
+    }
+
+    public function scopeDuLivreur($query, $livreurId)
+    {
+        return $query->where('livreur_id', $livreurId);
+    }
+
+    // ===== MÉTHODES =====
+
+    public function assignerLivreur(ProfilLivreur $livreur): void
+    {
+        $this->update([
+            'livreur_id' => $livreur->id,
+            'statut' => 'assignee',
+        ]);
+
+        $livreur->update(['est_disponible' => false]);
+    }
+
+    public function marquerLivree(PreuveLivraison $preuve = null): void
+    {
+        $this->update([
+            'statut' => 'livree',
+            'heure_livraison' => now(),
+        ]);
+
+        if ($this->livreur) {
+            $this->livreur->increment('total_livraisons');
+            $this->livreur->increment('total_gains', $this->commission_livreur);
+            $this->livreur->update(['est_disponible' => true]);
+        }
+    }
+
+    public function getDernierSuiviAttribute()
+    {
+        return $this->suivis()->latest()->first();
+    }
+}
+```
+
+### 9.3 `app/Models/SuiviLivraison.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class SuiviLivraison extends BaseModel
+{
+    protected $table = 'suivis_livraison';
+
+    public $timestamps = false;
+
+    protected $fillable = [
+        'livraison_id',
+        'livreur_id',
+        'latitude',
+        'longitude',
+        'vitesse',
+        'direction',
+        'precision_m',
+        'cree_le',
+    ];
+
+    protected $casts = [
+        'latitude' => 'decimal:8',
+        'longitude' => 'decimal:8',
+        'vitesse' => 'decimal:2',
+        'direction' => 'decimal:2',
+        'precision_m' => 'decimal:2',
+        'cree_le' => 'datetime',
+    ];
+
+    public function livraison(): BelongsTo
+    {
+        return $this->belongsTo(Livraison::class, 'livraison_id');
+    }
+
+    public function livreur(): BelongsTo
+    {
+        return $this->belongsTo(ProfilLivreur::class, 'livreur_id');
+    }
+}
+```
+
+### 9.4 `app/Models/PreuveLivraison.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class PreuveLivraison extends BaseModel
+{
+    protected $table = 'preuves_livraison';
+
+    public $timestamps = false;
+
+    protected $fillable = [
+        'livraison_id',
+        'type_preuve',
+        'chemin_fichier',
+        'signature_base64',
+        'code_confirmation',
+        'nom_destinataire',
+        'latitude',
+        'longitude',
+        'cree_le',
+    ];
+
+    protected $casts = [
+        'latitude' => 'decimal:8',
+        'longitude' => 'decimal:8',
+        'cree_le' => 'datetime',
+    ];
+
+    public function livraison(): BelongsTo
+    {
+        return $this->belongsTo(Livraison::class, 'livraison_id');
+    }
+}
+```
+
+### 9.5 `app/Models/EvaluationLivreur.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class EvaluationLivreur extends BaseModel
+{
+    protected $table = 'evaluations_livreur';
+
+    public $timestamps = false;
+
+    protected $fillable = [
+        'livraison_id',
+        'client_id',
+        'livreur_id',
+        'note',
+        'commentaire',
+        'ponctualite',
+        'politesse',
+        'cree_le',
+    ];
+
+    protected $casts = [
+        'note' => 'integer',
+        'ponctualite' => 'integer',
+        'politesse' => 'integer',
+        'cree_le' => 'datetime',
+    ];
+
+    public function livraison(): BelongsTo
+    {
+        return $this->belongsTo(Livraison::class, 'livraison_id');
+    }
+
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(ProfilClient::class, 'client_id');
+    }
+
+    public function livreur(): BelongsTo
+    {
+        return $this->belongsTo(ProfilLivreur::class, 'livreur_id');
+    }
+
+    protected static function booted()
+    {
+        static::created(function ($evaluation) {
+            // Recalculer la note moyenne du livreur
+            $noteMoyenne = self::where('livreur_id', $evaluation->livreur_id)->avg('note');
+            $evaluation->livreur->update(['note' => round($noteMoyenne, 2)]);
+        });
+    }
+}
+```
+
+### 9.6 `app/Models/PlanningLivreur.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class PlanningLivreur extends BaseModel
+{
+    protected $table = 'planning_livreurs';
+
+    protected $fillable = [
+        'livreur_id',
+        'date',
+        'heure_debut',
+        'heure_fin',
+        'statut',
+        'notes',
+    ];
+
+    protected $casts = [
+        'date' => 'date',
+    ];
+
+    public function livreur(): BelongsTo
+    {
+        return $this->belongsTo(ProfilLivreur::class, 'livreur_id');
+    }
+
+    public function scopeDateAujourdhui($query)
+    {
+        return $query->where('date', today());
+    }
+
+    public function scopePrevu($query)
+    {
+        return $query->where('statut', 'prevu');
+    }
+}
+```
+
+---
+
+## 💳 10. MODULE PAIEMENTS COMPLET (8 modèles)
+
+### 10.1 `app/Models/TransactionPaiement.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class TransactionPaiement extends BaseModel
+{
+    protected $table = 'transactions_paiement';
+
+    public $timestamps = false;
+
+    protected $fillable = [
+        'paiement_id',
+        'type_transaction',
+        'montant',
+        'statut',
+        'donnees_requete',
+        'donnees_reponse',
+        'code_erreur',
+        'message_erreur',
+        'adresse_ip',
+        'cree_le',
+    ];
+
+    protected $casts = [
+        'montant' => 'decimal:2',
+        'donnees_requete' => 'array',
+        'donnees_reponse' => 'array',
+        'cree_le' => 'datetime',
+    ];
+
+    public function paiement(): BelongsTo
+    {
+        return $this->belongsTo(Paiement::class, 'paiement_id');
+    }
+}
+```
+
+### 10.2 `app/Models/Remboursement.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class Remboursement extends BaseModel
+{
+    protected $table = 'remboursements';
+
+    protected $fillable = [
+        'paiement_id',
+        'commande_id',
+        'montant',
+        'raison',
+        'statut',
+        'reference_prestataire',
+        'traite_par_id',
+        'heure_traitement',
+    ];
+
+    protected $casts = [
+        'montant' => 'decimal:2',
+        'heure_traitement' => 'datetime',
+    ];
+
+    public function paiement(): BelongsTo
+    {
+        return $this->belongsTo(Paiement::class, 'paiement_id');
+    }
+
+    public function commande(): BelongsTo
+    {
+        return $this->belongsTo(Commande::class, 'commande_id');
+    }
+
+    public function traitePar(): BelongsTo
+    {
+        return $this->belongsTo(Utilisateur::class, 'traite_par_id');
+    }
+
+    public function scopeEnCours($query)
+    {
+        return $query->whereIn('statut', ['demande', 'en_cours']);
+    }
+}
+```
+
+### 10.3 `app/Models/CarteCadeau.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
+
+class CarteCadeau extends BaseModel
+{
+    protected $table = 'cartes_cadeau';
+
+    protected $fillable = [
+        'code',
+        'restaurant_id',
+        'acheteur_id',
+        'beneficiaire_id',
+        'montant_initial',
+        'montant_restant',
+        'devise',
+        'statut',
+        'message_personnalise',
+        'date_expiration',
+        'heure_activation',
+    ];
+
+    protected $casts = [
+        'montant_initial' => 'decimal:2',
+        'montant_restant' => 'decimal:2',
+        'date_expiration' => 'date',
+        'heure_activation' => 'datetime',
+    ];
+
+    protected static function booted()
+    {
+        parent::booted();
+
+        static::creating(function ($carte) {
+            if (empty($carte->code)) {
+                $carte->code = 'GIFT-' . strtoupper(Str::random(12));
+            }
+        });
+    }
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function acheteur(): BelongsTo
+    {
+        return $this->belongsTo(ProfilClient::class, 'acheteur_id');
+    }
+
+    public function beneficiaire(): BelongsTo
+    {
+        return $this->belongsTo(ProfilClient::class, 'beneficiaire_id');
+    }
+
+    public function transactions(): HasMany
+    {
+        return $this->hasMany(TransactionCarteCadeau::class, 'carte_cadeau_id');
+    }
+
+    public function scopeActives($query)
+    {
+        return $query->where('statut', 'active')
+            ->where(function($q) {
+                $q->whereNull('date_expiration')
+                  ->orWhere('date_expiration', '>=', now());
+            });
+    }
+
+    public function utiliser(float $montant): bool
+    {
+        if ($this->montant_restant < $montant || $this->statut !== 'active') {
+            return false;
+        }
+
+        $ancienSolde = $this->montant_restant;
+        $this->decrement('montant_restant', $montant);
+
+        if ($this->montant_restant <= 0) {
+            $this->update(['statut' => 'epuisee']);
+        }
+
+        $this->transactions()->create([
+            'type_transaction' => 'utilisation',
+            'montant' => -$montant,
+            'solde_apres' => $this->montant_restant,
+        ]);
+
+        return true;
+    }
+}
+```
+
+### 10.4 `app/Models/TransactionCarteCadeau.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class TransactionCarteCadeau extends BaseModel
+{
+    protected $table = 'transactions_carte_cadeau';
+
+    public $timestamps = false;
+
+    protected $fillable = [
+        'carte_cadeau_id',
+        'commande_id',
+        'type_transaction',
+        'montant',
+        'solde_apres',
+        'cree_le',
+    ];
+
+    protected $casts = [
+        'montant' => 'decimal:2',
+        'solde_apres' => 'decimal:2',
+        'cree_le' => 'datetime',
+    ];
+
+    public function carteCadeau(): BelongsTo
+    {
+        return $this->belongsTo(CarteCadeau::class, 'carte_cadeau_id');
+    }
+
+    public function commande(): BelongsTo
+    {
+        return $this->belongsTo(Commande::class, 'commande_id');
+    }
+}
+```
+
+### 10.5 `app/Models/TransactionPortefeuille.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class TransactionPortefeuille extends BaseModel
+{
+    protected $table = 'transactions_portefeuille';
+
+    public $timestamps = false;
+
+    protected $fillable = [
+        'portefeuille_id',
+        'commande_id',
+        'type_transaction',
+        'montant',
+        'solde_avant',
+        'solde_apres',
+        'description',
+        'reference',
+        'cree_le',
+    ];
+
+    protected $casts = [
+        'montant' => 'decimal:2',
+        'solde_avant' => 'decimal:2',
+        'solde_apres' => 'decimal:2',
+        'cree_le' => 'datetime',
+    ];
+
+    public function portefeuille(): BelongsTo
+    {
+        return $this->belongsTo(Portefeuille::class, 'portefeuille_id');
+    }
+
+    public function commande(): BelongsTo
+    {
+        return $this->belongsTo(Commande::class, 'commande_id');
+    }
+}
+```
+
+### 10.6 `app/Models/Facture.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class Facture extends BaseModel
+{
+    protected $table = 'factures';
+
+    protected $fillable = [
+        'numero',
+        'commande_id',
+        'client_id',
+        'restaurant_id',
+        'montant_ht',
+        'montant_tva',
+        'montant_ttc',
+        'taux_tva',
+        'chemin_pdf',
+        'statut',
+        'date_emission',
+        'date_echeance',
+    ];
+
+    protected $casts = [
+        'montant_ht' => 'decimal:2',
+        'montant_tva' => 'decimal:2',
+        'montant_ttc' => 'decimal:2',
+        'taux_tva' => 'decimal:2',
+        'date_emission' => 'date',
+        'date_echeance' => 'date',
+    ];
+
+    protected static function booted()
+    {
+        parent::booted();
+
+        static::creating(function ($facture) {
+            if (empty($facture->numero)) {
+                $annee = now()->format('Y');
+                $count = self::whereYear('cree_le', now()->year)->count() + 1;
+                $facture->numero = 'FAC-' . $annee . '-' . str_pad($count, 6, '0', STR_PAD_LEFT);
+            }
+        });
+    }
+
+    public function commande(): BelongsTo
+    {
+        return $this->belongsTo(Commande::class, 'commande_id');
+    }
+
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(ProfilClient::class, 'client_id');
+    }
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function scopeEmises($query)
+    {
+        return $query->where('statut', 'emise');
+    }
+
+    public function scopePayees($query)
+    {
+        return $query->where('statut', 'payee');
+    }
+}
+```
+
+### 10.7 `app/Models/ConfigurationPaiement.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class ConfigurationPaiement extends BaseModel
+{
+    protected $table = 'configurations_paiement';
+
+    protected $fillable = [
+        'restaurant_id',
+        'prestataire',
+        'est_active',
+        'cles_api',
+        'parametres',
+        'webhook_secret',
+    ];
+
+    protected $casts = [
+        'est_active' => 'boolean',
+        'cles_api' => 'encrypted:array',
+        'parametres' => 'array',
+    ];
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function scopeActives($query)
+    {
+        return $query->where('est_active', true);
+    }
+
+    public function scopePrestataire($query, string $prestataire)
+    {
+        return $query->where('prestataire', $prestataire);
+    }
+}
+```
+
+### 10.8 `app/Models/ReversementGerant.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class ReversementGerant extends BaseModel
+{
+    protected $table = 'reversements_gerants';
+
+    protected $fillable = [
+        'restaurant_id',
+        'gerant_id',
+        'periode_debut',
+        'periode_fin',
+        'montant_brut',
+        'commission_plateforme',
+        'montant_net',
+        'statut',
+        'date_paiement',
+        'reference_paiement',
+    ];
+
+    protected $casts = [
+        'periode_debut' => 'date',
+        'periode_fin' => 'date',
+        'montant_brut' => 'decimal:2',
+        'commission_plateforme' => 'decimal:2',
+        'montant_net' => 'decimal:2',
+        'date_paiement' => 'date',
+    ];
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function gerant(): BelongsTo
+    {
+        return $this->belongsTo(ProfilGerant::class, 'gerant_id');
+    }
+
+    public function scopeEnCours($query)
+    {
+        return $query->where('statut', 'en_cours');
+    }
+}
+```
+
+---
+
+## 🎁 11. MODULE MARKETING & FIDÉLITÉ (8 modèles)
+
+### 11.1 `app/Models/CodePromo.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+class CodePromo extends BaseModel
+{
+    protected $table = 'codes_promo';
+
+    protected $fillable = [
+        'code',
+        'restaurant_id',
+        'titre',
+        'description',
+        'type_reduction',
+        'valeur_reduction',
+        'montant_minimum',
+        'montant_maximum_reduction',
+        'utilisation_max',
+        'utilisation_par_client',
+        'date_debut',
+        'date_fin',
+        'est_actif',
+    ];
+
+    protected $casts = [
+        'valeur_reduction' => 'decimal:2',
+        'montant_minimum' => 'decimal:2',
+        'montant_maximum_reduction' => 'decimal:2',
+        'utilisation_max' => 'integer',
+        'utilisation_par_client' => 'integer',
+        'date_debut' => 'datetime',
+        'date_fin' => 'datetime',
+        'est_actif' => 'boolean',
+    ];
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function utilisations(): HasMany
+    {
+        return $this->hasMany(UtilisationCodePromo::class, 'code_promo_id');
+    }
+
+    public function scopeActifs($query)
+    {
+        return $query->where('est_actif', true)
+            ->where('date_debut', '<=', now())
+            ->where(function($q) {
+                $q->whereNull('date_fin')
+                  ->orWhere('date_fin', '>=', now());
+            });
+    }
+
+    public function scopeRestaurant($query, $restaurantId)
+    {
+        return $query->where(function($q) use ($restaurantId) {
+            $q->whereNull('restaurant_id')
+              ->orWhere('restaurant_id', $restaurantId);
+        });
+    }
+
+    public function estValidePour(Commande $commande): bool
+    {
+        // Vérifier dates
+        if ($this->date_debut->isFuture()) return false;
+        if ($this->date_fin && $this->date_fin->isPast()) return false;
+
+        // Vérifier montant minimum
+        if ($this->montant_minimum && $commande->sous_total < $this->montant_minimum) {
+            return false;
+        }
+
+        // Vérifier utilisation max
+        if ($this->utilisation_max && $this->utilisations()->count() >= $this->utilisation_max) {
+            return false;
+        }
+
+        // Vérifier utilisation par client
+        $utilisationsClient = $this->utilisations()
+            ->where('client_id', $commande->client_id)
+            ->count();
+
+        if ($utilisationsClient >= $this->utilisation_par_client) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public function calculerReduction(float $sousTotal): float
+    {
+        $reduction = match($this->type_reduction) {
+            'pourcentage' => $sousTotal * ($this->valeur_reduction / 100),
+            'montant_fixe' => $this->valeur_reduction,
+            'livraison_gratuite' => 0, // Traité séparément
+            default => 0,
+        };
+
+        if ($this->montant_maximum_reduction) {
+            $reduction = min($reduction, $this->montant_maximum_reduction);
+        }
+
+        return min($reduction, $sousTotal);
+    }
+}
+```
+
+### 11.2 `app/Models/UtilisationCodePromo.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class UtilisationCodePromo extends BaseModel
+{
+    protected $table = 'utilisations_code_promo';
+
+    public $timestamps = false;
+
+    protected $fillable = [
+        'code_promo_id',
+        'commande_id',
+        'client_id',
+        'montant_reduction',
+        'cree_le',
+    ];
+
+    protected $casts = [
+        'montant_reduction' => 'decimal:2',
+        'cree_le' => 'datetime',
+    ];
+
+    public function codePromo(): BelongsTo
+    {
+        return $this->belongsTo(CodePromo::class, 'code_promo_id');
+    }
+
+    public function commande(): BelongsTo
+    {
+        return $this->belongsTo(Commande::class, 'commande_id');
+    }
+
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(ProfilClient::class, 'client_id');
+    }
+}
+```
+
+### 11.3 `app/Models/TransactionFidelite.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class TransactionFidelite extends BaseModel
+{
+    protected $table = 'transactions_fidelite';
+
+    public $timestamps = false;
+
+    protected $fillable = [
+        'client_id',
+        'commande_id',
+        'type_transaction',
+        'nombre_points',
+        'solde_avant',
+        'solde_apres',
+        'description',
+        'cree_le',
+    ];
+
+    protected $casts = [
+        'nombre_points' => 'integer',
+        'solde_avant' => 'integer',
+        'solde_apres' => 'integer',
+        'cree_le' => 'datetime',
+    ];
+
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(ProfilClient::class, 'client_id');
+    }
+
+    public function commande(): BelongsTo
+    {
+        return $this->belongsTo(Commande::class, 'commande_id');
+    }
+}
+```
+
+### 11.4 `app/Models/NiveauFidelite.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+class NiveauFidelite extends BaseModel
+{
+    protected $table = 'niveaux_fidelite';
+
+    public $timestamps = false;
+
+    protected $fillable = [
+        'nom',
+        'points_minimum',
+        'avantages',
+        'couleur',
+        'icone',
+        'ordre_tri',
+        'cree_le',
+    ];
+
+    protected $casts = [
+        'points_minimum' => 'integer',
+        'avantages' => 'array',
+        'cree_le' => 'datetime',
+    ];
+
+    public static function getNiveauPourPoints(int $points): ?self
+    {
+        return self::where('points_minimum', '<=', $points)
+            ->orderByDesc('points_minimum')
+            ->first();
+    }
+}
+```
+
+### 11.5 `app/Models/Parrainage.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class Parrainage extends BaseModel
+{
+    protected $table = 'parrainages';
+
+    public $timestamps = false;
+
+    protected $fillable = [
+        'parrain_id',
+        'filleul_id',
+        'code_utilise',
+        'bonus_parrain',
+        'bonus_filleul',
+        'statut',
+        'date_validation',
+        'cree_le',
+    ];
+
+    protected $casts = [
+        'bonus_parrain' => 'integer',
+        'bonus_filleul' => 'integer',
+        'date_validation' => 'datetime',
+        'cree_le' => 'datetime',
+    ];
+
+    public function parrain(): BelongsTo
+    {
+        return $this->belongsTo(ProfilClient::class, 'parrain_id');
+    }
+
+    public function filleul(): BelongsTo
+    {
+        return $this->belongsTo(ProfilClient::class, 'filleul_id');
+    }
+
+    public function valider(): void
+    {
+        $this->update([
+            'statut' => 'valide',
+            'date_validation' => now(),
+        ]);
+
+        // Attribuer les bonus
+        $this->parrain->ajouterPointsFidelite($this->bonus_parrain, 'Bonus parrainage');
+        $this->filleul->ajouterPointsFidelite($this->bonus_filleul, 'Bonus bienvenue parrainage');
+    }
+}
+```
+
+### 11.6 `app/Models/CampagneMarketing.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use App\Traits\HasTranslations;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class CampagneMarketing extends BaseModel
+{
+    use HasTranslations;
+
+    protected $table = 'campagnes_marketing';
+
+    public array $translatable = ['contenu'];
+
+    protected $fillable = [
+        'nom',
+        'type_campagne',
+        'restaurant_id',
+        'sujet',
+        'contenu',
+        'cibles',
+        'date_envoi_planifiee',
+        'date_envoi_effective',
+        'statut',
+        'nb_destinataires',
+        'nb_ouverts',
+        'nb_cliques',
+        'nb_conversions',
+        'cree_par_id',
+    ];
+
+    protected $casts = [
+        'cibles' => 'array',
+        'date_envoi_planifiee' => 'datetime',
+        'date_envoi_effective' => 'datetime',
+        'nb_destinataires' => 'integer',
+        'nb_ouverts' => 'integer',
+        'nb_cliques' => 'integer',
+        'nb_conversions' => 'integer',
+    ];
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function creePar(): BelongsTo
+    {
+        return $this->belongsTo(Utilisateur::class, 'cree_par_id');
+    }
+
+    public function scopeBrouillons($query)
+    {
+        return $query->where('statut', 'brouillon');
+    }
+
+    public function scopeEnvoyees($query)
+    {
+        return $query->where('statut', 'envoyee');
+    }
+
+    public function getTauxOuvertureAttribute(): float
+    {
+        if ($this->nb_destinataires === 0) return 0;
+        return ($this->nb_ouverts / $this->nb_destinataires) * 100;
+    }
+
+    public function getTauxConversionAttribute(): float
+    {
+        if ($this->nb_destinataires === 0) return 0;
+        return ($this->nb_conversions / $this->nb_destinataires) * 100;
+    }
+}
+```
+
+### 11.7 `app/Models/AbonneNewsletter.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class AbonneNewsletter extends BaseModel
+{
+    protected $table = 'abonnes_newsletter';
+
+    protected $fillable = [
+        'email',
+        'client_id',
+        'restaurant_id',
+        'statut',
+        'token_confirmation',
+        'langue',
+        'date_confirmation',
+    ];
+
+    protected $casts = [
+        'date_confirmation' => 'datetime',
+    ];
+
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(ProfilClient::class, 'client_id');
+    }
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function scopeActifs($query)
+    {
+        return $query->where('statut', 'actif');
+    }
+
+    public function confirmer(): void
+    {
+        $this->update([
+            'statut' => 'actif',
+            'date_confirmation' => now(),
+            'token_confirmation' => null,
+        ]);
+    }
+}
+```
+
+### 11.8 `app/Models/BannierePromotionnelle.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use App\Traits\HasTranslations;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class BannierePromotionnelle extends BaseModel
+{
+    use HasTranslations;
+
+    protected $table = 'bannieres_promotionnelles';
+
+    public array $translatable = ['titre', 'sous_titre'];
+
+    protected $fillable = [
+        'restaurant_id',
+        'titre',
+        'sous_titre',
+        'image',
+        'lien',
+        'position',
+        'date_debut',
+        'date_fin',
+        'est_active',
+        'ordre_tri',
+    ];
+
+    protected $casts = [
+        'date_debut' => 'datetime',
+        'date_fin' => 'datetime',
+        'est_active' => 'boolean',
+        'ordre_tri' => 'integer',
+    ];
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function scopeActives($query)
+    {
+        return $query->where('est_active', true)
+            ->where('date_debut', '<=', now())
+            ->where(function($q) {
+                $q->whereNull('date_fin')
+                  ->orWhere('date_fin', '>=', now());
+            })
+            ->orderBy('ordre_tri');
+    }
+
+    public function scopePosition($query, string $position)
+    {
+        return $query->where(function($q) use ($position) {
+            $q->where('position', $position)
+              ->orWhere('position', 'partout');
+        });
+    }
+}
+```
+
+---
+
+## ⭐ 12. MODULE AVIS & RÉPUTATION (4 modèles)
+
+### 12.1 `app/Models/Avi.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+
+class Avi extends BaseModel
+{
+    protected $table = 'avis';
+
+    protected $fillable = [
+        'commande_id',
+        'client_id',
+        'restaurant_id',
+        'livreur_id',
+        'note_globale',
+        'note_qualite',
+        'note_service',
+        'note_rapidite',
+        'commentaire',
+        'est_visible',
+        'est_modere',
+        'reponse_restaurant',
+        'reponse_le',
+        'repondu_par_id',
+    ];
+
+    protected $casts = [
+        'note_globale' => 'integer',
+        'note_qualite' => 'integer',
+        'note_service' => 'integer',
+        'note_rapidite' => 'integer',
+        'est_visible' => 'boolean',
+        'est_modere' => 'boolean',
+        'reponse_le' => 'datetime',
+    ];
+
+    public function commande(): BelongsTo
+    {
+        return $this->belongsTo(Commande::class, 'commande_id');
+    }
+
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(ProfilClient::class, 'client_id');
+    }
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function livreur(): BelongsTo
+    {
+        return $this->belongsTo(ProfilLivreur::class, 'livreur_id');
+    }
+
+    public function reponse(): HasOne
+    {
+        return $this->hasOne(ReponseAvi::class, 'avis_id');
+    }
+
+    public function photos(): HasMany
+    {
+        return $this->hasMany(PhotoAvi::class, 'avis_id');
+    }
+
+    public function signalements(): HasMany
+    {
+        return $this->hasMany(SignalementAvi::class, 'avis_id');
+    }
+
+    public function reponduPar(): BelongsTo
+    {
+        return $this->belongsTo(Utilisateur::class, 'repondu_par_id');
+    }
+
+    public function scopeVisibles($query)
+    {
+        return $query->where('est_visible', true);
+    }
+
+    public function scopeDuRestaurant($query, $restaurantId)
+    {
+        return $query->where('restaurant_id', $restaurantId);
+    }
+
+    public function repondre(string $contenu, Utilisateur $repondant): void
+    {
+        $this->update([
+            'reponse_restaurant' => $contenu,
+            'reponse_le' => now(),
+            'repondu_par_id' => $repondant->id,
+        ]);
+    }
+
+    protected static function booted()
+    {
+        static::created(function ($avis) {
+            $avis->restaurant->recalculerNote();
+        });
+
+        static::updated(function ($avis) {
+            if ($avis->wasChanged('est_visible')) {
+                $avis->restaurant->recalculerNote();
+            }
+        });
+    }
+}
+```
+
+### 12.2 `app/Models/PhotoAvi.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class PhotoAvi extends BaseModel
+{
+    protected $table = 'photos_avis';
+
+    public $timestamps = false;
+
+    protected $fillable = [
+        'avis_id',
+        'chemin_image',
+        'ordre_tri',
+        'cree_le',
+    ];
+
+    protected $casts = [
+        'cree_le' => 'datetime',
+    ];
+
+    public function avis(): BelongsTo
+    {
+        return $this->belongsTo(Avi::class, 'avis_id');
+    }
+}
+```
+
+### 12.3 `app/Models/SignalementAvi.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class SignalementAvi extends BaseModel
+{
+    protected $table = 'signalements_avis';
+
+    public $timestamps = false;
+
+    protected $fillable = [
+        'avis_id',
+        'signale_par_id',
+        'motif',
+        'details',
+        'statut',
+        'traite_par_id',
+        'traitement_le',
+        'cree_le',
+    ];
+
+    protected $casts = [
+        'traitement_le' => 'datetime',
+        'cree_le' => 'datetime',
+    ];
+
+    public function avis(): BelongsTo
+    {
+        return $this->belongsTo(Avi::class, 'avis_id');
+    }
+
+    public function signalePar(): BelongsTo
+    {
+        return $this->belongsTo(Utilisateur::class, 'signale_par_id');
+    }
+
+    public function traitePar(): BelongsTo
+    {
+        return $this->belongsTo(Utilisateur::class, 'traite_par_id');
+    }
+
+    public function traiter(string $statut, Utilisateur $traiteur): void
+    {
+        $this->update([
+            'statut' => $statut,
+            'traite_par_id' => $traiteur->id,
+            'traitement_le' => now(),
+        ]);
+
+        if ($statut === 'traite') {
+            $this->avis->update(['est_visible' => false]);
+        }
+    }
+}
+```
+
+### 12.4 `app/Models/ReponseAvi.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class ReponseAvi extends BaseModel
+{
+    protected $table = 'reponses_avis';
+
+    protected $fillable = [
+        'avis_id',
+        'repondu_par_id',
+        'contenu',
+    ];
+
+    public function avis(): BelongsTo
+    {
+        return $this->belongsTo(Avi::class, 'avis_id');
+    }
+
+    public function reponduPar(): BelongsTo
+    {
+        return $this->belongsTo(Utilisateur::class, 'repondu_par_id');
+    }
+}
+```
+
+---
+
+## 🔔 13. MODULE NOTIFICATIONS (3 modèles)
+
+### 13.1 `app/Models/Notification.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use App\Traits\HasTranslations;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class Notification extends BaseModel
+{
+    use HasTranslations;
+
+    protected $table = 'notifications';
+
+    public array $translatable = ['titre', 'message'];
+
+    public $timestamps = false;
+
+    protected $fillable = [
+        'utilisateur_id',
+        'type',
+        'titre',
+        'message',
+        'donnees',
+        'canal',
+        'est_lue',
+        'date_lecture',
+        'lien_action',
+        'cree_le',
+    ];
+
+    protected $casts = [
+        'donnees' => 'array',
+        'est_lue' => 'boolean',
+        'date_lecture' => 'datetime',
+        'cree_le' => 'datetime',
+    ];
+
+    public function utilisateur(): BelongsTo
+    {
+        return $this->belongsTo(Utilisateur::class, 'utilisateur_id');
+    }
+
+    public function scopeNonLues($query)
+    {
+        return $query->where('est_lue', false);
+    }
+
+    public function scopeUtilisateur($query, $utilisateurId)
+    {
+        return $query->where('utilisateur_id', $utilisateurId);
+    }
+
+    public function marquerCommeLue(): void
+    {
+        $this->update([
+            'est_lue' => true,
+            'date_lecture' => now(),
+        ]);
+    }
+
+    public static function marquerToutesCommeLues($utilisateurId): void
+    {
+        self::utilisateur($utilisateurId)
+            ->nonLues()
+            ->update([
+                'est_lue' => true,
+                'date_lecture' => now(),
+            ]);
+    }
+}
+```
+
+### 13.2 `app/Models/PreferenceNotification.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class PreferenceNotification extends BaseModel
+{
+    protected $table = 'preferences_notifications';
+
+    protected $fillable = [
+        'utilisateur_id',
+        'type_notification',
+        'canal',
+        'est_active',
+    ];
+
+    protected $casts = [
+        'est_active' => 'boolean',
+    ];
+
+    public function utilisateur(): BelongsTo
+    {
+        return $this->belongsTo(Utilisateur::class, 'utilisateur_id');
+    }
+
+    public static function estActivePour($utilisateurId, string $type, string $canal): bool
+    {
+        $preference = self::where('utilisateur_id', $utilisateurId)
+            ->where('type_notification', $type)
+            ->where('canal', $canal)
+            ->first();
+
+        return $preference ? $preference->est_active : true; // Actif par défaut
+    }
+}
+```
+
+### 13.3 `app/Models/TokenPush.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class TokenPush extends BaseModel
+{
+    protected $table = 'tokens_push';
+
+    protected $fillable = [
+        'utilisateur_id',
+        'token',
+        'plateforme',
+        'est_actif',
+        'derniere_utilisation',
+    ];
+
+    protected $casts = [
+        'est_actif' => 'boolean',
+        'derniere_utilisation' => 'datetime',
+    ];
+
+    public function utilisateur(): BelongsTo
+    {
+        return $this->belongsTo(Utilisateur::class, 'utilisateur_id');
+    }
+
+    public function scopeActifs($query)
+    {
+        return $query->where('est_actif', true);
+    }
+
+    public function scopePlateforme($query, string $plateforme)
+    {
+        return $query->where('plateforme', $plateforme);
+    }
+
+    public function marquerUtilise(): void
+    {
+        $this->update(['derniere_utilisation' => now()]);
+    }
+}
+```
+
+---
+
+## 🎫 14. MODULE SUPPORT (3 modèles)
+
+### 14.1 `app/Models/TicketSupport.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
+
+class TicketSupport extends BaseModel
+{
+    protected $table = 'tickets_support';
+
+    protected $fillable = [
+        'numero',
+        'client_id',
+        'restaurant_id',
+        'assigne_a_id',
+        'categorie',
+        'sujet',
+        'priorite',
+        'statut',
+        'canal_origine',
+        'date_resolution',
+    ];
+
+    protected $casts = [
+        'date_resolution' => 'datetime',
+    ];
+
+    protected static function booted()
+    {
+        parent::booted();
+
+        static::creating(function ($ticket) {
+            if (empty($ticket->numero)) {
+                $date = now()->format('Ymd');
+                $count = self::whereDate('cree_le', today())->count() + 1;
+                $ticket->numero = 'TKT-' . $date . '-' . str_pad($count, 4, '0', STR_PAD_LEFT);
+            }
+        });
+    }
+
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(ProfilClient::class, 'client_id');
+    }
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public function assigneA(): BelongsTo
+    {
+        return $this->belongsTo(Utilisateur::class, 'assigne_a_id');
+    }
+
+    public function messages(): HasMany
+    {
+        return $this->hasMany(MessageTicket::class, 'ticket_id');
+    }
+
+    public function scopeOuverts($query)
+    {
+        return $query->where('statut', 'ouvert');
+    }
+
+    public function scopeEnCours($query)
+    {
+        return $query->where('statut', 'en_cours');
+    }
+
+    public function scopeUrgents($query)
+    {
+        return $query->where('priorite', 'urgente');
+    }
+
+    public function resoudre(): void
+    {
+        $this->update([
+            'statut' => 'resolu',
+            'date_resolution' => now(),
+        ]);
+    }
+}
+```
+
+### 14.2 `app/Models/MessageTicket.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+class MessageTicket extends BaseModel
+{
+    protected $table = 'messages_ticket';
+
+    public $timestamps = false;
+
+    protected $fillable = [
+        'ticket_id',
+        'expediteur_id',
+        'type_expediteur',
+        'contenu',
+        'est_prive',
+        'cree_le',
+    ];
+
+    protected $casts = [
+        'est_prive' => 'boolean',
+        'cree_le' => 'datetime',
+    ];
+
+    public function ticket(): BelongsTo
+    {
+        return $this->belongsTo(TicketSupport::class, 'ticket_id');
+    }
+
+    public function expediteur(): BelongsTo
+    {
+        return $this->belongsTo(Utilisateur::class, 'expediteur_id');
+    }
+
+    public function piecesJointes(): HasMany
+    {
+        return $this->hasMany(PieceJointeTicket::class, 'message_id');
+    }
+}
+```
+
+### 14.3 `app/Models/PieceJointeTicket.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class PieceJointeTicket extends BaseModel
+{
+    protected $table = 'pieces_jointes_ticket';
+
+    public $timestamps = false;
+
+    protected $fillable = [
+        'message_id',
+        'nom_fichier',
+        'chemin_fichier',
+        'taille_octets',
+        'type_mime',
+        'cree_le',
+    ];
+
+    protected $casts = [
+        'taille_octets' => 'integer',
+        'cree_le' => 'datetime',
+    ];
+
+    public function message(): BelongsTo
+    {
+        return $this->belongsTo(MessageTicket::class, 'message_id');
+    }
+
+    public function getTailleLisibleAttribute(): string
+    {
+        $bytes = $this->taille_octets;
+        $units = ['o', 'Ko', 'Mo', 'Go'];
+        $i = 0;
+        while ($bytes >= 1024 && $i < count($units) - 1) {
+            $bytes /= 1024;
+            $i++;
+        }
+        return round($bytes, 2) . ' ' . $units[$i];
+    }
+}
+```
+
+---
+
+## ⚙️ 15. MODULE SYSTÈME (Modèles clés)
+
+### 15.1 `app/Models/JournalAudit.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class JournalAudit extends BaseModel
+{
+    protected $table = 'journaux_audit';
+
+    public $timestamps = false;
+
+    protected $fillable = [
+        'utilisateur_id',
+        'action',
+        'entite_type',
+        'entite_id',
+        'anciennes_valeurs',
+        'nouvelles_valeurs',
+        'adresse_ip',
+        'user_agent',
+        'cree_le',
+    ];
+
+    protected $casts = [
+        'anciennes_valeurs' => 'array',
+        'nouvelles_valeurs' => 'array',
+        'cree_le' => 'datetime',
+    ];
+
+    public function utilisateur(): BelongsTo
+    {
+        return $this->belongsTo(Utilisateur::class, 'utilisateur_id');
+    }
+
+    public static function logger(
+        string $action,
+        string $entiteType,
+        ?string $entiteId,
+        ?array $anciennesValeurs,
+        ?array $nouvellesValeurs,
+        ?int $utilisateurId = null
+    ): void {
+        self::create([
+            'utilisateur_id' => $utilisateurId ?? auth()->id(),
+            'action' => $action,
+            'entite_type' => $entiteType,
+            'entite_id' => $entiteId,
+            'anciennes_valeurs' => $anciennesValeurs,
+            'nouvelles_valeurs' => $nouvellesValeurs,
+            'adresse_ip' => request()->ip(),
+            'user_agent' => request()->userAgent(),
+        ]);
+    }
+}
+```
+
+### 15.2 `app/Models/Parametre.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class Parametre extends BaseModel
+{
+    protected $table = 'parametres';
+
+    protected $fillable = [
+        'restaurant_id',
+        'cle',
+        'valeur',
+        'type_valeur',
+        'description',
+    ];
+
+    protected $casts = [
+        'valeur' => 'json',
+    ];
+
+    public function restaurant(): BelongsTo
+    {
+        return $this->belongsTo(Restaurant::class, 'restaurant_id');
+    }
+
+    public static function get(string $cle, $restaurantId = null, $defaut = null)
+    {
+        $parametre = self::where('cle', $cle)
+            ->where('restaurant_id', $restaurantId)
+            ->first();
+
+        if (!$parametre) {
+            // Fallback sur paramètre global
+            $parametre = self::where('cle', $cle)
+                ->whereNull('restaurant_id')
+                ->first();
+        }
+
+        return $parametre ? $parametre->valeur : $defaut;
+    }
+
+    public static function set(string $cle, $valeur, ?int $restaurantId = null): void
+    {
+        self::updateOrCreate(
+            ['cle' => $cle, 'restaurant_id' => $restaurantId],
+            ['valeur' => $valeur]
+        );
+    }
+}
+```
+
+### 15.3 `app/Models/Traduction.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+class Traduction extends BaseModel
+{
+    protected $table = 'traductions';
+
+    protected $fillable = [
+        'groupe',
+        'cle',
+        'langue',
+        'valeur',
+    ];
+
+    public static function get(string $groupe, string $cle, string $langue = 'fr'): ?string
+    {
+        return self::where('groupe', $groupe)
+            ->where('cle', $cle)
+            ->where('langue', $langue)
+            ->value('valeur');
+    }
+
+    public static function set(string $groupe, string $cle, string $langue, string $valeur): void
+    {
+        self::updateOrCreate(
+            ['groupe' => $groupe, 'cle' => $cle, 'langue' => $langue],
+            ['valeur' => $valeur]
+        );
+    }
+}
+```
+
