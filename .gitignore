@@ -1,37 +1,92 @@
-# Environment
+```
+# Laravel-specific ignores
+vendor/
+bootstrap/cache/
+storage/logs/
+storage/framework/
+public/storage
 .env
 .env.local
-.env.*.local
-*.env.*
-
-# Dependencies
-/vendor/
-/node_modules/
+.env.*
+!.env.example
 
 # Compiled and build artifacts
-*.js.map
-*.min.js
-*.min.css
-dist/
-build/
 *.pyc
 __pycache__/
+*.o
+*.obj
+*.class
+*.exe
+*.dll
+*.so
+*.a
+*.out
 
-# Editors
-.vscode/
-.idea/
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp
+.pnp.js
+.npm
+.bun
 
 # Logs and temp files
 *.log
 *.tmp
+*.swp
+*.swo
+*.bak
+*.cache
+*.jar
+
+# Environment specific
+.env
+.env.local
+.env.*
+!.env.example
 
 # OS generated files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+desktop.ini
 
-# Laravel
-/storage/*.key
-/public/storage
-bootstrap/cache/
-storage/logs/
-storage/framework/
+# Editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.atom
+*.tm_properties
+*.vsixmanifest
+
+# Build outputs
+dist/
+build/
+target/
+out/
+coverage/
+htmlcov/
+.coverage
+*.out
+*.bin
+*.dll
+*.so
+*.dylib
+
+# Testing
+.phpunit.result.cache
+.phpunit.xml
+test-report.xml
+
+# Laravel compiled assets
+public/css/app.css
+public/js/app.js
+public/mix-manifest.json
+```
