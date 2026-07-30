@@ -1,0 +1,632 @@
+# ⚡ EVENTS, LISTENERS & WEBSOCKETS (Temps Réel)
+
+Voici la configuration complète pour rendre ton application **réactive et asynchrone**. Nous allons utiliser **Laravel Reverb** (le serveur WebSocket natif de Laravel 11+) pour le temps réel, et les **Queues** pour les tâches lourdes (emails, SMS).
+
+---
+
+## 📖 1. POURQUOI DES EVENTS & LISTENERS ?
+
+| Problème | Solution avec Events/Listeners |
+|---|---|
+| Le gérant doit rafraîchir la page pour voir les nouvelles commandes. | **WebSocket** : La commande apparaît instantanément sur l'écran de cuisine. |
+| Le client veut savoir où est son livreur. | **WebSocket** : Le point du livreur bouge en temps réel sur la carte. |
+| L'envoi d'email/SMS ralentit la validation de la commande. | **Queue** : L'email est mis en file d'attente, la réponse au client est immédiate. |
+
+---
+
+## ⚙️ 2. CONFIGURATION INITIALE
+
+### 2.1 Installer le broadcasting et les queues (Laravel 11+)
+
+```bash
+# Installer le support du broadcasting (Reverb)
+php artisan install:broadcasting
+
+# Installer le support des queues (nécessite Redis en prod, mais fonctionne avec 'database' en dev)
+php artisan queue:table
+php artisan migrate
+```
+
+### 2.2 Fichier `.env`
+
+```env
+# === BROADCASTING (Temps réel) ===
+BROADCAST_CONNECTION=reverb
+REVERB_APP_ID=ton-app-id
+REVERB_APP_KEY=ton-app-key
+REVERB_APP_SECRET=ton-app-secret
+REVERB_HOST="localhost"
+REVERB_PORT=8080
+REVERB_SCHEME=http
+
+# === QUEUES (Tâches asynchrones) ===
+QUEUE_CONNECTION=database # Ou 'redis' en production
+
+# === CACHE & SESSION (Recommandé avec Redis en prod) ===
+CACHE_STORE=database
+SESSION_DRIVER=database
+```
+
+*(Si tu utilises Pusher au lieu de Reverb, remplace `reverb` par `pusher` et configure `PUSHER_APP_ID`, etc.)*
+
+---
+
+## 📡 3. LES ÉVÉNEMENTS (EVENTS)
+
+Les événements sont des "annonces" que quelque chose vient de se passer.
+
+### 3.1 `app/Events/NouvelleCommandeRecue.php`
+
+```php
+<?php
+
+namespace App\Events;
+
+use App\Models\Commande;
+use Illuminate\Broadcasting\Channel;
+use Illuminate\Broadcasting\InteractsWithSockets;
+use Illuminate\Broadcasting\PresenceChannel;
+use Illuminate\Broadcasting\PrivateChannel;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Foundation\Events\Dispatchable;
+use Illuminate\Queue\SerializesModels;
+
+class NouvelleCommandeRecue implements ShouldBroadcast
+{
+    use Dispatchable, InteractsWithSockets, SerializesModels;
+
+    public function __construct(
+        public Commande $commande
+    ) {}
+
+    /**
+     * Les canaux sur lesquels diffuser l'événement.
+     * Ici, on diffuse sur le canal privé du restaurant concerné.
+     */
+    public function broadcastOn(): array
+    {
+        return [
+            new PrivateChannel('restaurant.' . $this->commande->restaurant_id),
+        ];
+    }
+
+    /**
+     * Le nom de l'événement tel qu'il sera reçu côté frontend.
+     */
+    public function broadcastAs(): string
+    {
+        return 'commande.recue';
+    }
+
+    /**
+     * Les données à envoyer (on évite d'envoyer tout l'objet, on formate).
+     */
+    public function broadcastWith(): array
+    {
+        return [
+            'commande_id' => $this->commande->id,
+            'numero' => $this->commande->numero,
+            'montant_total' => $this->commande->montant_total,
+            'type_commande' => $this->commande->type_commande->value,
+            'cree_le' => $this->commande->cree_le->format('H:i:s'),
+        ];
+    }
+}
+```
+
+### 3.2 `app/Events/StatutCommandeModifie.php`
+
+```php
+<?php
+
+namespace App\Events;
+
+use App\Models\Commande;
+use App\Enums\StatutCommande;
+use Illuminate\Broadcasting\PrivateChannel;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Foundation\Events\Dispatchable;
+use Illuminate\Queue\SerializesModels;
+
+class StatutCommandeModifie implements ShouldBroadcast
+{
+    use Dispatchable, SerializesModels;
+
+    public function __construct(
+        public Commande $commande,
+        public StatutCommande $ancienStatut,
+        public StatutCommande $nouveauStatut
+    ) {}
+
+    public function broadcastOn(): array
+    {
+        return [
+            // Le client suit sa commande
+            new PrivateChannel('client.' . $this->commande->client_id),
+            // Le restaurant voit aussi le changement
+            new PrivateChannel('restaurant.' . $this->commande->restaurant_id),
+        ];
+    }
+
+    public function broadcastAs(): string
+    {
+        return 'commande.statut.modifie';
+    }
+
+    public function broadcastWith(): array
+    {
+        return [
+            'commande_id' => $this->commande->id,
+            'numero' => $this->commande->numero,
+            'ancien_statut' => $this->ancienStatut->value,
+            'nouveau_statut' => $this->nouveauStatut->value,
+            'nouveau_statut_label' => $this->nouveauStatut->label(),
+            'couleur' => $this->nouveauStatut->color(),
+        ];
+    }
+}
+```
+
+### 3.3 `app/Events/PositionLivreurMiseAJour.php`
+
+```php
+<?php
+
+namespace App\Events;
+
+use App\Models\Livraison;
+use Illuminate\Broadcasting\PrivateChannel;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow; // BroadcastNow pour un temps réel ultra-rapide
+use Illuminate\Foundation\Events\Dispatchable;
+use Illuminate\Queue\SerializesModels;
+
+class PositionLivreurMiseAJour implements ShouldBroadcastNow
+{
+    use Dispatchable, SerializesModels;
+
+    public function __construct(
+        public string $livraisonId,
+        public float $latitude,
+        public float $longitude
+    ) {}
+
+    public function broadcastOn(): array
+    {
+        // Seul le client qui a passé la commande peut suivre cette livraison
+        // On suppose que la livraison a une relation 'commande'
+        $livraison = \App\Models\Livraison::find($this->livraisonId);
+        
+        return [
+            new PrivateChannel('livraison.' . $this->livraisonId),
+        ];
+    }
+
+    public function broadcastAs(): string
+    {
+        return 'livreur.position';
+    }
+
+    public function broadcastWith(): array
+    {
+        return [
+            'lat' => $this->latitude,
+            'lng' => $this->longitude,
+            'timestamp' => now()->toIso8601String(),
+        ];
+    }
+}
+```
+
+---
+
+## 👂 4. LES ÉCOUTEURS (LISTENERS)
+
+Les écouteurs réagissent aux événements. Ils doivent implémenter `ShouldQueue` pour ne pas bloquer le processus principal.
+
+### 4.1 `app/Listeners/EnvoyerNotificationNouvelleCommande.php`
+
+```php
+<?php
+
+namespace App\Listeners;
+
+use App\Events\NouvelleCommandeRecue;
+use App\Services\NotificationService;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Queue\InteractsWithQueue;
+
+class EnvoyerNotificationNouvelleCommande implements ShouldQueue
+{
+    // Indique à Laravel de mettre ce listener dans la file d'attente
+    use InteractsWithQueue;
+
+    public function __construct(
+        private NotificationService $notificationService
+    ) {}
+
+    public function handle(NouvelleCommandeRecue $event): void
+    {
+        $commande = $event->commande;
+
+        // 1. Notification In-App au gérant
+        if ($commande->restaurant->gerant) {
+            $this->notificationService->creerNotification(
+                $commande->restaurant->gerant->utilisateur_id,
+                'nouvelle_commande',
+                'Nouvelle commande',
+                "Commande #{$commande->numero} reçue ({$commande->montant_total} FCFA)",
+                'in_app'
+            );
+        }
+
+        // 2. Son d'alerte en cuisine (géré côté frontend, mais on peut déclencher un webhook ici si besoin)
+        
+        // 3. SMS au client pour confirmer la bonne réception
+        if ($commande->client->utilisateur->telephone) {
+            $this->notificationService->envoyerSms(
+                $commande->client->utilisateur->telephone,
+                "Votre commande #{$commande->numero} a été reçue par le restaurant et est en cours de traitement."
+            );
+        }
+    }
+}
+```
+
+### 4.2 `app/Listeners/MettreAJourStatistiquesVente.php`
+
+```php
+<?php
+
+namespace App\Listeners;
+
+use App\Events\StatutCommandeModifie;
+use App\Enums\StatutCommande;
+use App\Models\JournalAudit;
+use Illuminate\Contracts\Queue\ShouldQueue;
+
+class MettreAJourStatistiquesVente implements ShouldQueue
+{
+    public function handle(StatutCommandeModifie $event): void
+    {
+        // Si la commande passe à "Terminée", on peut déclencher des calculs de stats
+        if ($event->nouveauStatut === StatutCommande::TERMINEE) {
+            // Exemple : Mettre à jour un cache de chiffre d'affaires du jour
+            $cleCache = 'ca_du_jour_restaurant_' . $event->commande->restaurant_id;
+            
+            // On utilise Redis/Cache pour incrémenter de manière atomique
+            \Illuminate\Support\Facades\Cache::increment($cleCache, $event->commande->montant_total);
+
+            // Journal d'audit
+            JournalAudit::logger(
+                'commande_terminee',
+                'Commande',
+                $event->commande->id,
+                ['statut' => $event->ancienStatut->value],
+                ['statut' => $event->nouveauStatut->value]
+            );
+        }
+    }
+}
+```
+
+---
+
+## 🔗 5. ENREGISTREMENT DES ÉVÉNEMENTS ET LISTENERS
+
+### 5.1 `app/Providers/EventServiceProvider.php`
+
+```php
+<?php
+
+namespace App\Providers;
+
+use App\Events\NouvelleCommandeRecue;
+use App\Events\StatutCommandeModifie;
+use App\Listeners\EnvoyerNotificationNouvelleCommande;
+use App\Listeners\MettreAJourStatistiquesVente;
+use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
+
+class EventServiceProvider extends ServiceProvider
+{
+    /**
+     * The event to listener mappings for the application.
+     *
+     * @var array<class-string, array<int, class-string>>
+     */
+    protected $listen = [
+        NouvelleCommandeRecue::class => [
+            EnvoyerNotificationNouvelleCommande::class,
+        ],
+
+        StatutCommandeModifie::class => [
+            MettreAJourStatistiquesVente::class,
+            // Tu peux ajouter d'autres listeners ici, ex: EnvoyerEmailSuivi::class
+        ],
+    ];
+
+    public function boot(): void
+    {
+        //
+    }
+}
+```
+
+---
+
+## 🔐 6. AUTORISATION DES CANAUX (CHANNELS)
+
+Pour qu'un utilisateur puisse écouter un canal privé (`PrivateChannel`), Laravel doit vérifier qu'il en a le droit.
+
+### 6.1 `routes/channels.php`
+
+```php
+<?php
+
+use App\Models\Utilisateur;
+use App\Models\Commande;
+use App\Models\Livraison;
+use Illuminate\Support\Facades\Broadcast;
+
+/*
+|--------------------------------------------------------------------------
+| Broadcast Channels
+|--------------------------------------------------------------------------
+*/
+
+// 1. Canal du Restaurant (pour le gérant/admin)
+Broadcast::channel('restaurant.{restaurantId}', function (Utilisateur $user, string $restaurantId) {
+    if ($user->role->value === 'superadmin') return true;
+    
+    if ($user->role->value === 'admin') {
+        return $user->profilAdmin?->restaurants()->where('restaurants.id', $restaurantId)->exists();
+    }
+    
+    if ($user->role->value === 'gerant') {
+        return $user->profilGerant?->restaurant_id === $restaurantId;
+    }
+    
+    return false;
+});
+
+// 2. Canal du Client (pour suivre SES commandes)
+Broadcast::channel('client.{clientId}', function (Utilisateur $user, string $clientId) {
+    return $user->profilClient?->id === $clientId;
+});
+
+// 3. Canal de la Livraison (pour le suivi GPS en temps réel)
+Broadcast::channel('livraison.{livraisonId}', function (Utilisateur $user, string $livraisonId) {
+    $livraison = Livraison::find($livraisonId);
+    if (!$livraison) return false;
+
+    // Le client de la commande OU le livreur assigné peuvent écouter
+    $estClient = $user->profilClient?->id === $livraison->commande->client_id;
+    $estLivreur = $user->profilLivreur?->id === $livraison->livreur_id;
+    $estStaff = in_array($user->role->value, ['superadmin', 'admin', 'gerant']);
+
+    return $estClient || $estLivreur || $estStaff;
+});
+```
+
+---
+
+## 🚀 7. DÉCLENCHEMENT DANS LES SERVICES
+
+Maintenant, modifions nos Services pour qu'ils **déclenchent** ces événements.
+
+### 7.1 Dans `app/Services/OrderService.php`
+
+```php
+// ... à la fin de la méthode creerDepuisPanier(), après la création de la commande :
+
+use App\Events\NouvelleCommandeRecue;
+
+// ...
+        // 10. DÉCLENCHEMENT DE L'ÉVÉNEMENT
+        event(new NouvelleCommandeRecue($commande));
+
+        return $commande->load(['lignes.produit', 'paiement', 'livraison']);
+// ...
+```
+
+```php
+// ... dans la méthode changerStatut() :
+
+use App\Events\StatutCommandeModifie;
+
+// ...
+        $ancienStatut = $commande->statut;
+        $commande->update(['statut' => $nouveauStatut]);
+
+        // DÉCLENCHEMENT DE L'ÉVÉNEMENT
+        event(new StatutCommandeModifie($commande, $ancienStatut, $nouveauStatut));
+// ...
+```
+
+### 7.2 Dans `app/Services/DeliveryService.php`
+
+```php
+// ... dans la méthode enregistrerPosition() :
+
+use App\Events\PositionLivreurMiseAJour;
+
+// ...
+        // Enregistrer le suivi en base de données
+        SuiviLivraison::create([
+            'livraison_id' => $livraison->id,
+            'livreur_id' => $livreur->id,
+            'latitude' => $lat,
+            'longitude' => $lng,
+            // ...
+        ]);
+
+        // DÉCLENCHEMENT DE L'ÉVÉNEMENT TEMPS RÉEL
+        event(new PositionLivreurMiseAJour($livraison->id, $lat, $lng));
+// ...
+```
+
+---
+
+## 💻 8. CÔTÉ FRONTEND (Écouter les événements)
+
+Voici comment recevoir ces données en temps réel dans une vue **Blade + Livewire** ou **JavaScript vanilla**.
+
+### 8.1 Configuration JS (`resources/js/bootstrap.js`)
+
+```javascript
+import Echo from 'laravel-echo';
+import Pusher from 'pusher-js';
+
+window.Pusher = Pusher;
+
+window.Echo = new Echo({
+    broadcaster: 'reverb',
+    key: import.meta.env.VITE_REVERB_APP_KEY,
+    wsHost: import.meta.env.VITE_REVERB_HOST,
+    wsPort: import.meta.env.VITE_REVERB_PORT ?? 8080,
+    wssPort: import.meta.env.VITE_REVERB_PORT ?? 443,
+    forceTLS: (import.meta.env.VITE_REVERB_SCHEME ?? 'https') === 'https',
+    enabledTransports: ['ws', 'wss'],
+});
+```
+
+### 8.2 Exemple : Écran de Cuisine (Gérant)
+
+Dans un composant Livewire `KitchenDisplay.php` :
+
+```php
+<?php
+
+namespace App\Livewire\Gerant;
+
+use Livewire\Component;
+use App\Models\Commande;
+use App\Enums\StatutCommande;
+
+class KitchenDisplay extends Component
+{
+    public $commandesEnCours;
+
+    public function mount()
+    {
+        $this->chargerCommandes();
+    }
+
+    public function chargerCommandes()
+    {
+        $restaurantId = auth()->user()->profilGerant->restaurant_id;
+        $this->commandesEnCours = Commande::duRestaurant($restaurantId)
+            ->whereIn('statut', [StatutCommande::EN_ATTENTE, StatutCommande::CONFIRMEE, StatutCommande::EN_PREPARATION])
+            ->with(['lignes.produit', 'table'])
+            ->orderBy('cree_le', 'asc')
+            ->get();
+    }
+
+    // Méthode appelée par le frontend quand un événement WebSocket arrive
+    public function onNouvelleCommande($data)
+    {
+        // On recharge les commandes pour afficher la nouvelle instantanément
+        $this->chargerCommandes();
+        
+        // Optionnel : Jouer un son
+        $this->dispatch('play-notification-sound');
+    }
+
+    public function render()
+    {
+        return view('livewire.gerant.kitchen-display');
+    }
+}
+```
+
+**Vue Blade associée (`kitchen-display.blade.php`) :**
+
+```blade
+<div>
+    <h2>👨‍🍳 Écran de Cuisine</h2>
+    
+    <div class="grid grid-cols-3 gap-4">
+        @foreach($commandesEnCours as $commande)
+            <div class="border p-4 rounded shadow bg-white" wire:key="{{ $commande->id }}">
+                <h3 class="font-bold text-lg">Commande #{{ $commande->numero }}</h3>
+                <p class="text-gray-600">Table: {{ $commande->table?->numero_table ?? 'N/A' }}</p>
+                <ul class="mt-2">
+                    @foreach($commande->lignes as $ligne)
+                        <li>- {{ $ligne->quantite }}x {{ $ligne->produit->nom }} 
+                            @if($ligne->notes) <span class="text-red-500 text-sm">({{ $ligne->notes }})</span> @endif
+                        </li>
+                    @endforeach
+                </ul>
+                <button wire:click="changerStatut('{{ $commande->id }}', 'prete')" class="mt-4 bg-green-500 text-white px-4 py-2 rounded">
+                    Marquer comme Prête
+                </button>
+            </div>
+        @endforeach
+    </div>
+
+    @script
+    <script>
+        // Écouter l'événement WebSocket
+        window.Echo.private(`restaurant.{{ auth()->user()->profilGerant->restaurant_id }}`)
+            .listen('.commande.recue', (e) => {
+                // Appeler la méthode Livewire 'onNouvelleCommande'
+                $wire.onNouvelleCommande(e);
+            });
+    </script>
+    @endscript
+</div>
+```
+
+### 8.3 Exemple : Suivi de Livraison (Client)
+
+Dans le JavaScript de la page de suivi de commande :
+
+```javascript
+const livraisonId = "uuid-de-la-livraison";
+
+window.Echo.private(`livraison.${livraisonId}`)
+    .listen('.livreur.position', (e) => {
+        console.log("Nouvelle position du livreur:", e.lat, e.lng);
+        
+        // Mettre à jour le marqueur sur la carte Google Maps / Leaflet
+        if (window.livreurMarker) {
+            window.livreurMarker.setLatLng([e.lat, e.lng]);
+            window.map.panTo([e.lat, e.lng]);
+        }
+    });
+```
+
+---
+
+## 🛠️ 9. COMMANDES UTILES POUR LE DÉVELOPPEMENT
+
+1. **Lancer le serveur WebSocket (Reverb) :**
+   ```bash
+   php artisan reverb:start
+   # Ou avec hot-reload pour le dev :
+   php artisan reverb:start --debug
+   ```
+
+2. **Lancer le worker des queues (pour les Listeners) :**
+   ```bash
+   php artisan queue:work
+   # Ou pour surveiller en temps réel :
+   php artisan queue:listen
+   ```
+
+3. **Vider une file d'attente bloquée :**
+   ```bash
+   php artisan queue:flush
+   ```
+
+---
+
+## 📊 RÉCAPITULATIF DE L'ARCHITECTURE TEMPS RÉEL
+
+1. **Action** : Le client valide sa commande.
+2. **Service** : `OrderService` sauvegarde en BDD (Transaction).
+3. **Event** : `event(new NouvelleCommandeRecue($commande))` est déclenché.
+4. **Broadcast** : Laravel envoie l'événement au serveur Reverb sur le canal `restaurant.X`.
+5. **Listener (Queue)** : `EnvoyerNotificationNouvelleCommande` est mis en file d'attente pour envoyer l'email/SMS sans ralentir la réponse HTTP.
+6. **Frontend (Gérant)** : Le navigateur du gérant reçoit le message via WebSocket et met à jour l'écran de cuisine instantanément.
+
+---
