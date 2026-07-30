@@ -1,21 +1,3 @@
-```
-# Environment
-.env.local
+The provided input shows only a modified file named 'resto_project' which appears to be a source file/directory name without any file extension indicating it's a compiled artifact, temporary file, or dependency. Since there are no build artifacts, dependency directories, editor files, or other items that should be ignored according to the rules, and the modification is just a regular project file/directory, no entries need to be added to .gitignore.
 
-# Dependencies
-node_modules/
-
-# Editors
-.vscode/
-
-# Compiled and build artifacts
-*.js.map
-*.min.js
-*.min.css
-dist/
-build/
-
-# Logs and temp files
-*.log
-*.tmp
-```
+# No changes needed - resto_project appears to be a legitimate project file/directory
