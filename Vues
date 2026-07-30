@@ -1,0 +1,2282 @@
+# 🎨 VUES BLADE + LIVEWIRE COMPLÈTES
+
+Voici l'ensemble des vues pour ton application, organisées de manière exhaustive. J'utilise **Tailwind CSS** + **Livewire 3** + **Alpine.js** pour une interface moderne et réactive.
+
+---
+
+## 📁 1. STRUCTURE COMPLÈTE DES VUES
+
+```
+resources/views/
+├── layouts/
+│   ├── app.blade.php              # Layout principal (public)
+│   ├── auth.blade.php             # Layout authentification
+│   ├── superadmin.blade.php       # Layout SuperAdmin
+│   ├── admin.blade.php            # Layout Admin
+│   ├── gerant.blade.php           # Layout Gérant
+│   ├── livreur.blade.php          # Layout Livreur
+│   └── client.blade.php           # Layout Client
+├── components/                    # Composants réutilisables
+│   ├── alert.blade.php
+│   ├── modal.blade.php
+│   ├── badge-statut.blade.php
+│   ├── card-restaurant.blade.php
+│   ├── card-produit.blade.php
+│   ├── card-commande.blade.php
+│   ├── pagination.blade.php
+│   ├── sidebar-link.blade.php
+│   ├── stats-card.blade.php
+│   └── empty-state.blade.php
+├── auth/
+│   ├── login.blade.php
+│   ├── register.blade.php
+│   ├── forgot-password.blade.php
+│   └── reset-password.blade.php
+├── public/
+│   └── home.blade.php             # Page d'accueil publique
+├── superadmin/
+│   ├── dashboard.blade.php
+│   ├── restaurants/{index,create,edit,show}.blade.php
+│   ├── utilisateurs/{index,create,edit}.blade.php
+│   ├── statistiques.blade.php
+│   └── parametres.blade.php
+├── admin/
+│   ├── dashboard.blade.php
+│   └── restaurants/{index,show}.blade.php
+├── gerant/
+│   ├── dashboard.blade.php
+│   ├── restaurant/edit.blade.php
+│   ├── categories/{index,create,edit}.blade.php
+│   ├── produits/{index,create,edit,show}.blade.php
+│   ├── menus-du-jour/{index,create,edit}.blade.php
+│   ├── commandes/{index,show,kitchen}.blade.php
+│   ├── reservations/{index,calendrier}.blade.php
+│   ├── livraisons/{index,zones}.blade.php
+│   ├── tables/{index,create,edit}.blade.php
+│   ├── horaires/index.blade.php
+│   ├── avis/index.blade.php
+│   ├── codes-promo/{index,create,edit}.blade.php
+│   └── statistiques/{index,ventes,plats}.blade.php
+├── livreur/
+│   ├── dashboard.blade.php
+│   ├── livraisons/{index,disponibles,show}.blade.php
+│   ├── planning.blade.php
+│   └── gains.blade.php
+├── client/
+│   ├── dashboard.blade.php
+│   ├── restaurants/{index,show,menu}.blade.php
+│   ├── panier/show.blade.php
+│   ├── commandes/{index,show,suivi}.blade.php
+│   ├── reservations/{index,create,show}.blade.php
+│   ├── adresses/{index,create,edit}.blade.php
+│   ├── favoris/index.blade.php
+│   ├── portefeuille/show.blade.php
+│   ├── fidelite/{show,historique}.blade.php
+│   ├── notifications/index.blade.php
+│   ├── tickets/{index,show,create}.blade.php
+│   └── profil/{edit,preferences}.blade.php
+├── emails/
+│   ├── restaurant/{nouvelle-commande,nouvelle-reservation}.blade.php
+│   └── client/{confirmation-commande,annulation-commande,confirmation-reservation,demande-avis}.blade.php
+└── livewire/
+    ├── gerant/kitchen-display.blade.php
+    ├── client/suivi-livraison.blade.php
+    └── shared/notifications-dropdown.blade.php
+```
+
+---
+
+## 🎨 2. LAYOUTS PRINCIPAUX
+
+### 2.1 `resources/views/layouts/app.blade.php` (Layout public)
+
+```blade
+<!DOCTYPE html>
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>@yield('title', config('app.name'))</title>
+    
+    @vite(['resources/css/app.css', 'resources/js/app.js'])
+    @livewireStyles
+</head>
+<body class="bg-gray-50 min-h-screen flex flex-col">
+    {{-- Header public --}}
+    <header class="bg-white shadow-sm sticky top-0 z-40">
+        <nav class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <a href="{{ route('home') }}" class="text-2xl font-bold text-orange-600">
+                        🍽️ RestoApp
+                    </a>
+                </div>
+                
+                <div class="flex items-center space-x-4">
+                    <a href="{{ route('client.restaurants.index') }}" class="text-gray-700 hover:text-orange-600">
+                        Restaurants
+                    </a>
+                    
+                    @auth
+                        <a href="{{ route('dashboard') }}" class="bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700">
+                            Mon espace
+                        </a>
+                    @else
+                        <a href="{{ route('login') }}" class="text-gray-700 hover:text-orange-600">Connexion</a>
+                        <a href="{{ route('register') }}" class="bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700">
+                            Inscription
+                        </a>
+                    @endauth
+                </div>
+            </div>
+        </nav>
+    </header>
+
+    {{-- Contenu principal --}}
+    <main class="flex-1">
+        @if(session('success'))
+            <x-alert type="success" :message="session('success')" />
+        @endif
+        
+        @if(session('error'))
+            <x-alert type="error" :message="session('error')" />
+        @endif
+
+        @yield('content')
+    </main>
+
+    {{-- Footer --}}
+    <footer class="bg-gray-900 text-gray-300 py-8">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <p>&copy; {{ date('Y') }} RestoApp. Tous droits réservés.</p>
+        </div>
+    </footer>
+
+    @livewireScripts
+    @stack('scripts')
+</body>
+</html>
+```
+
+### 2.2 `resources/views/layouts/auth.blade.php` (Authentification)
+
+```blade
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>@yield('title') - RestoApp</title>
+    @vite(['resources/css/app.css', 'resources/js/app.js'])
+</head>
+<body class="bg-gradient-to-br from-orange-50 to-orange-100 min-h-screen flex items-center justify-center p-4">
+    <div class="w-full max-w-md">
+        <div class="text-center mb-8">
+            <a href="{{ route('home') }}" class="text-4xl font-bold text-orange-600">🍽️ RestoApp</a>
+            <p class="text-gray-600 mt-2">La plateforme de restauration nouvelle génération</p>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-xl p-8">
+            @if(session('success'))
+                <x-alert type="success" :message="session('success')" />
+            @endif
+
+            @yield('content')
+        </div>
+
+        <p class="text-center text-gray-500 text-sm mt-6">
+            &copy; {{ date('Y') }} RestoApp
+        </p>
+    </div>
+</body>
+</html>
+```
+
+### 2.3 `resources/views/layouts/gerant.blade.php` (Layout Gérant - similaire pour autres rôles)
+
+```blade
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>@yield('title', 'Espace Gérant') - RestoApp</title>
+    @vite(['resources/css/app.css', 'resources/js/app.js'])
+    @livewireStyles
+</head>
+<body class="bg-gray-100">
+    <div class="flex h-screen overflow-hidden">
+        {{-- Sidebar --}}
+        <aside class="w-64 bg-gray-900 text-white flex-shrink-0 hidden md:block">
+            <div class="p-6">
+                <h1 class="text-2xl font-bold text-orange-500">🍽️ RestoApp</h1>
+                <p class="text-gray-400 text-sm mt-1">Espace Gérant</p>
+            </div>
+
+            <nav class="mt-6">
+                <x-sidebar-link href="{{ route('gerant.dashboard') }}" icon="📊" :active="request()->routeIs('gerant.dashboard')">
+                    Tableau de bord
+                </x-sidebar-link>
+                
+                <p class="px-6 pt-4 pb-2 text-xs uppercase text-gray-500">Restaurant</p>
+                <x-sidebar-link href="{{ route('gerant.restaurant.edit') }}" icon="🏪" :active="request()->routeIs('gerant.restaurant.*')">
+                    Mon restaurant
+                </x-sidebar-link>
+                <x-sidebar-link href="{{ route('gerant.horaires.index') }}" icon="🕐" :active="request()->routeIs('gerant.horaires.*')">
+                    Horaires
+                </x-sidebar-link>
+                <x-sidebar-link href="{{ route('gerant.tables.index') }}" icon="🪑" :active="request()->routeIs('gerant.tables.*')">
+                    Tables & Salles
+                </x-sidebar-link>
+
+                <p class="px-6 pt-4 pb-2 text-xs uppercase text-gray-500">Menu</p>
+                <x-sidebar-link href="{{ route('gerant.categories.index') }}" icon="📂" :active="request()->routeIs('gerant.categories.*')">
+                    Catégories
+                </x-sidebar-link>
+                <x-sidebar-link href="{{ route('gerant.produits.index') }}" icon="🍔" :active="request()->routeIs('gerant.produits.*')">
+                    Produits
+                </x-sidebar-link>
+                <x-sidebar-link href="{{ route('gerant.menus-du-jour.index') }}" icon="📅" :active="request()->routeIs('gerant.menus-du-jour.*')">
+                    Menus du jour
+                </x-sidebar-link>
+
+                <p class="px-6 pt-4 pb-2 text-xs uppercase text-gray-500">Opérations</p>
+                <x-sidebar-link href="{{ route('gerant.commandes.index') }}" icon="📋" :active="request()->routeIs('gerant.commandes.*')">
+                    Commandes
+                    @php $count = \App\Models\Commande::duRestaurant(auth()->user()->profilGerant->restaurant_id)->enCours()->count(); @endphp
+                    @if($count > 0)
+                        <span class="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">{{ $count }}</span>
+                    @endif
+                </x-sidebar-link>
+                <x-sidebar-link href="{{ route('gerant.reservations.index') }}" icon="📆" :active="request()->routeIs('gerant.reservations.*')">
+                    Réservations
+                </x-sidebar-link>
+                <x-sidebar-link href="{{ route('gerant.livraisons.index') }}" icon="🛵" :active="request()->routeIs('gerant.livraisons.*')">
+                    Livraisons
+                </x-sidebar-link>
+
+                <p class="px-6 pt-4 pb-2 text-xs uppercase text-gray-500">Marketing</p>
+                <x-sidebar-link href="{{ route('gerant.avis.index') }}" icon="⭐" :active="request()->routeIs('gerant.avis.*')">
+                    Avis clients
+                </x-sidebar-link>
+                <x-sidebar-link href="{{ route('gerant.codes-promo.index') }}" icon="🎟️" :active="request()->routeIs('gerant.codes-promo.*')">
+                    Codes promo
+                </x-sidebar-link>
+
+                <p class="px-6 pt-4 pb-2 text-xs uppercase text-gray-500">Analyse</p>
+                <x-sidebar-link href="{{ route('gerant.statistiques.index') }}" icon="📈" :active="request()->routeIs('gerant.statistiques.*')">
+                    Statistiques
+                </x-sidebar-link>
+            </nav>
+        </aside>
+
+        {{-- Contenu principal --}}
+        <div class="flex-1 flex flex-col overflow-hidden">
+            {{-- Topbar --}}
+            <header class="bg-white shadow-sm">
+                <div class="flex justify-between items-center px-6 py-4">
+                    <h2 class="text-2xl font-bold text-gray-800">@yield('header', 'Tableau de bord')</h2>
+                    
+                    <div class="flex items-center space-x-4">
+                        {{-- Notifications --}}
+                        @livewire('shared.notifications-dropdown')
+                        
+                        {{-- Profil utilisateur --}}
+                        <div class="flex items-center space-x-3">
+                            <img src="{{ auth()->user()->avatar_url }}" class="w-10 h-10 rounded-full" alt="Avatar">
+                            <div>
+                                <p class="font-semibold text-gray-800">{{ auth()->user()->nom_complet }}</p>
+                                <p class="text-xs text-gray-500">Gérant</p>
+                            </div>
+                        </div>
+                        
+                        <form method="POST" action="{{ route('logout') }}">
+                            @csrf
+                            <button type="submit" class="text-gray-600 hover:text-red-600" title="Déconnexion">
+                                🚪
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </header>
+
+            {{-- Contenu --}}
+            <main class="flex-1 overflow-y-auto p-6">
+                @if(session('success'))
+                    <x-alert type="success" :message="session('success')" />
+                @endif
+                @if(session('error'))
+                    <x-alert type="error" :message="session('error')" />
+                @endif
+                @if($errors->any())
+                    <x-alert type="error" :message="$errors->first()" />
+                @endif
+
+                @yield('content')
+            </main>
+        </div>
+    </div>
+
+    @livewireScripts
+    @stack('scripts')
+</body>
+</html>
+```
+
+---
+
+## 🧩 3. COMPOSANTS RÉUTILISABLES
+
+### 3.1 `resources/views/components/alert.blade.php`
+
+```blade
+@props(['type' => 'info', 'message'])
+
+@php
+    $classes = [
+        'success' => 'bg-green-50 border-green-500 text-green-800',
+        'error' => 'bg-red-50 border-red-500 text-red-800',
+        'warning' => 'bg-yellow-50 border-yellow-500 text-yellow-800',
+        'info' => 'bg-blue-50 border-blue-500 text-blue-800',
+    ][$type] ?? 'bg-blue-50 border-blue-500 text-blue-800';
+
+    $icons = [
+        'success' => '✅',
+        'error' => '❌',
+        'warning' => '⚠️',
+        'info' => 'ℹ️',
+    ][$type] ?? 'ℹ️';
+@endphp
+
+<div {{ $attributes->merge(['class' => "border-l-4 p-4 mb-4 rounded $classes"]) }} x-data="{ show: true }" x-show="show" x-transition>
+    <div class="flex items-center justify-between">
+        <div class="flex items-center">
+            <span class="text-xl mr-2">{{ $icons }}</span>
+            <p>{{ $message }}</p>
+        </div>
+        <button @click="show = false" class="text-gray-500 hover:text-gray-700">✕</button>
+    </div>
+</div>
+```
+
+### 3.2 `resources/views/components/sidebar-link.blade.php`
+
+```blade
+@props(['href', 'icon', 'active' => false])
+
+@php
+    $classes = $active 
+        ? 'bg-orange-600 text-white' 
+        : 'text-gray-300 hover:bg-gray-800 hover:text-white';
+@endphp
+
+<a href="{{ $href }}" class="flex items-center px-6 py-3 text-sm {{ $classes }} transition-colors">
+    <span class="mr-3">{{ $icon }}</span>
+    <span class="flex-1">{{ $slot }}</span>
+</a>
+```
+
+### 3.3 `resources/views/components/stats-card.blade.php`
+
+```blade
+@props(['title', 'value', 'icon', 'color' => 'blue', 'trend' => null])
+
+@php
+    $colors = [
+        'blue' => 'from-blue-500 to-blue-600',
+        'green' => 'from-green-500 to-green-600',
+        'orange' => 'from-orange-500 to-orange-600',
+        'red' => 'from-red-500 to-red-600',
+        'purple' => 'from-purple-500 to-purple-600',
+    ][$color] ?? 'from-blue-500 to-blue-600';
+@endphp
+
+<div class="bg-white rounded-xl shadow-sm p-6 border-l-4 {{ str_replace('from-', 'border-', explode(' ', $colors)[0]) }}">
+    <div class="flex items-center justify-between">
+        <div>
+            <p class="text-sm text-gray-500 uppercase tracking-wide">{{ $title }}</p>
+            <p class="text-3xl font-bold text-gray-800 mt-2">{{ $value }}</p>
+            @if($trend)
+                <p class="text-sm mt-2 {{ $trend >= 0 ? 'text-green-600' : 'text-red-600' }}">
+                    {{ $trend >= 0 ? '↑' : '↓' }} {{ abs($trend) }}% vs hier
+                </p>
+            @endif
+        </div>
+        <div class="bg-gradient-to-br {{ $colors }} text-white rounded-full p-4 text-2xl">
+            {{ $icon }}
+        </div>
+    </div>
+</div>
+```
+
+### 3.4 `resources/views/components/badge-statut.blade.php`
+
+```blade
+@props(['statut', 'label' => null])
+
+@php
+    $colors = [
+        'en_attente' => 'bg-yellow-100 text-yellow-800',
+        'confirmee' => 'bg-blue-100 text-blue-800',
+        'en_preparation' => 'bg-indigo-100 text-indigo-800',
+        'prete' => 'bg-cyan-100 text-cyan-800',
+        'en_livraison' => 'bg-purple-100 text-purple-800',
+        'livree' => 'bg-green-100 text-green-800',
+        'terminee' => 'bg-gray-100 text-gray-800',
+        'annulee' => 'bg-red-100 text-red-800',
+        'remboursee' => 'bg-orange-100 text-orange-800',
+        'actif' => 'bg-green-100 text-green-800',
+        'inactif' => 'bg-gray-100 text-gray-800',
+        'suspendu' => 'bg-red-100 text-red-800',
+    ][$statut] ?? 'bg-gray-100 text-gray-800';
+
+    $labels = [
+        'en_attente' => 'En attente',
+        'confirmee' => 'Confirmée',
+        'en_preparation' => 'En préparation',
+        'prete' => 'Prête',
+        'en_livraison' => 'En livraison',
+        'livree' => 'Livrée',
+        'terminee' => 'Terminée',
+        'annulee' => 'Annulée',
+        'remboursee' => 'Remboursée',
+        'actif' => 'Actif',
+        'inactif' => 'Inactif',
+        'suspendu' => 'Suspendu',
+    ][$statut] ?? $statut;
+@endphp
+
+<span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold {{ $colors }}">
+    {{ $label ?? $labels }}
+</span>
+```
+
+### 3.5 `resources/views/components/empty-state.blade.php`
+
+```blade
+@props(['icon' => '📭', 'title', 'description' => null, 'action' => null])
+
+<div class="text-center py-12">
+    <div class="text-6xl mb-4">{{ $icon }}</div>
+    <h3 class="text-xl font-semibold text-gray-700 mb-2">{{ $title }}</h3>
+    @if($description)
+        <p class="text-gray-500 mb-6">{{ $description }}</p>
+    @endif
+    @if($action)
+        {{ $action }}
+    @endif
+</div>
+```
+
+---
+
+## 🔐 4. VUES D'AUTHENTIFICATION
+
+### 4.1 `resources/views/auth/login.blade.php`
+
+```blade
+@extends('layouts.auth')
+@section('title', 'Connexion')
+
+@section('content')
+    <h2 class="text-2xl font-bold text-center text-gray-800 mb-6">Connexion</h2>
+
+    <form method="POST" action="{{ route('login') }}" class="space-y-4">
+        @csrf
+        
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <input type="email" name="email" value="{{ old('email') }}" required autofocus
+                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent">
+            @error('email')
+                <p class="text-red-500 text-sm mt-1">{{ $message }}</p>
+            @enderror
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Mot de passe</label>
+            <input type="password" name="password" required
+                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent">
+            @error('password')
+                <p class="text-red-500 text-sm mt-1">{{ $message }}</p>
+            @enderror
+        </div>
+
+        <div class="flex items-center justify-between">
+            <label class="flex items-center">
+                <input type="checkbox" name="remember" class="rounded border-gray-300 text-orange-600">
+                <span class="ml-2 text-sm text-gray-600">Se souvenir de moi</span>
+            </label>
+            <a href="{{ route('password.request') }}" class="text-sm text-orange-600 hover:underline">
+                Mot de passe oublié ?
+            </a>
+        </div>
+
+        <button type="submit" class="w-full bg-orange-600 text-white py-3 rounded-lg font-semibold hover:bg-orange-700 transition">
+            Se connecter
+        </button>
+    </form>
+
+    <p class="text-center text-gray-600 mt-6">
+        Pas encore de compte ? 
+        <a href="{{ route('register') }}" class="text-orange-600 font-semibold hover:underline">S'inscrire</a>
+    </p>
+@endsection
+```
+
+### 4.2 `resources/views/auth/register.blade.php`
+
+```blade
+@extends('layouts.auth')
+@section('title', 'Inscription')
+
+@section('content')
+    <h2 class="text-2xl font-bold text-center text-gray-800 mb-6">Créer un compte</h2>
+
+    <form method="POST" action="{{ route('register') }}" class="space-y-4">
+        @csrf
+        
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Prénom</label>
+                <input type="text" name="prenom" value="{{ old('prenom') }}" required
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                @error('prenom')
+                    <p class="text-red-500 text-sm mt-1">{{ $message }}</p>
+                @enderror
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Nom</label>
+                <input type="text" name="nom" value="{{ old('nom') }}" required
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                @error('nom')
+                    <p class="text-red-500 text-sm mt-1">{{ $message }}</p>
+                @enderror
+            </div>
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <input type="email" name="email" value="{{ old('email') }}" required
+                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+            @error('email')
+                <p class="text-red-500 text-sm mt-1">{{ $message }}</p>
+            @enderror
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Téléphone</label>
+            <input type="tel" name="telephone" value="{{ old('telephone') }}" placeholder="+225 07 XX XX XX XX"
+                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+            @error('telephone')
+                <p class="text-red-500 text-sm mt-1">{{ $message }}</p>
+            @enderror
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Mot de passe</label>
+            <input type="password" name="password" required
+                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+            <p class="text-xs text-gray-500 mt-1">Minimum 8 caractères, avec majuscules et chiffres</p>
+            @error('password')
+                <p class="text-red-500 text-sm mt-1">{{ $message }}</p>
+            @enderror
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Confirmer le mot de passe</label>
+            <input type="password" name="password_confirmation" required
+                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Code parrainage (optionnel)</label>
+            <input type="text" name="code_parrainage" value="{{ old('code_parrainage') }}"
+                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+        </div>
+
+        <button type="submit" class="w-full bg-orange-600 text-white py-3 rounded-lg font-semibold hover:bg-orange-700 transition">
+            Créer mon compte
+        </button>
+    </form>
+
+    <p class="text-center text-gray-600 mt-6">
+        Déjà un compte ? 
+        <a href="{{ route('login') }}" class="text-orange-600 font-semibold hover:underline">Se connecter</a>
+    </p>
+@endsection
+```
+
+---
+
+## 🏠 5. PAGE D'ACCUEIL PUBLIQUE
+
+### `resources/views/public/home.blade.php`
+
+```blade
+@extends('layouts.app')
+@section('title', 'Accueil')
+
+@section('content')
+    {{-- Hero --}}
+    <section class="bg-gradient-to-br from-orange-500 to-red-600 text-white py-20">
+        <div class="max-w-7xl mx-auto px-4 text-center">
+            <h1 class="text-5xl font-bold mb-6">Commandez vos plats préférés en un clic</h1>
+            <p class="text-xl mb-8 opacity-90">Découvrez les meilleurs restaurants d'Abidjan et faites-vous livrer</p>
+            <div class="flex justify-center gap-4">
+                <a href="{{ route('client.restaurants.index') }}" class="bg-white text-orange-600 px-8 py-3 rounded-lg font-semibold hover:bg-gray-100 transition">
+                    Voir les restaurants
+                </a>
+                <a href="{{ route('register') }}" class="bg-transparent border-2 border-white text-white px-8 py-3 rounded-lg font-semibold hover:bg-white hover:text-orange-600 transition">
+                    Créer un compte
+                </a>
+            </div>
+        </div>
+    </section>
+
+    {{-- Restaurants en avant --}}
+    <section class="py-16 max-w-7xl mx-auto px-4">
+        <h2 class="text-3xl font-bold text-gray-800 mb-8">🔥 Restaurants populaires</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            @forelse($restaurantsEnAvant ?? [] as $restaurant)
+                <x-card-restaurant :restaurant="$restaurant" />
+            @empty
+                <p class="col-span-3 text-center text-gray-500">Aucun restaurant disponible pour le moment.</p>
+            @endforelse
+        </div>
+    </section>
+
+    {{-- Fonctionnalités --}}
+    <section class="bg-gray-50 py-16">
+        <div class="max-w-7xl mx-auto px-4">
+            <h2 class="text-3xl font-bold text-center text-gray-800 mb-12">Pourquoi choisir RestoApp ?</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div class="text-center">
+                    <div class="text-6xl mb-4">🚀</div>
+                    <h3 class="text-xl font-bold mb-2">Livraison rapide</h3>
+                    <p class="text-gray-600">Recevez vos plats en moins de 30 minutes</p>
+                </div>
+                <div class="text-center">
+                    <div class="text-6xl mb-4">💳</div>
+                    <h3 class="text-xl font-bold mb-2">Paiement sécurisé</h3>
+                    <p class="text-gray-600">Mobile Money, CB, portefeuille, cartes cadeaux</p>
+                </div>
+                <div class="text-center">
+                    <div class="text-6xl mb-4">🎁</div>
+                    <h3 class="text-xl font-bold mb-2">Programme fidélité</h3>
+                    <p class="text-gray-600">Gagnez des points à chaque commande</p>
+                </div>
+            </div>
+        </div>
+    </section>
+@endsection
+```
+
+---
+
+## 📊 6. ESPACE SUPERADMIN
+
+### 6.1 `resources/views/superadmin/dashboard.blade.php`
+
+```blade
+@extends('layouts.superadmin')
+@section('title', 'Tableau de bord')
+@section('header', 'Tableau de bord SuperAdmin')
+
+@section('content')
+    {{-- Stats globales --}}
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <x-stats-card title="Restaurants" :value="$stats['restaurants']" icon="🏪" color="blue" :trend="$stats['restaurants_trend']" />
+        <x-stats-card title="Utilisateurs" :value="$stats['utilisateurs']" icon="👥" color="green" :trend="$stats['utilisateurs_trend']" />
+        <x-stats-card title="Commandes (jour)" :value="$stats['commandes_jour']" icon="📋" color="orange" :trend="$stats['commandes_trend']" />
+        <x-stats-card title="CA (jour)" :value="number_format($stats['ca_jour'], 0, ',', ' ') . ' FCFA'" icon="💰" color="purple" :trend="$stats['ca_trend']" />
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {{-- Restaurants récents --}}
+        <div class="bg-white rounded-xl shadow-sm p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold">Restaurants récents</h3>
+                <a href="{{ route('superadmin.restaurants.index') }}" class="text-orange-600 hover:underline text-sm">Voir tout →</a>
+            </div>
+            <div class="space-y-3">
+                @forelse($restaurantsRecents as $restaurant)
+                    <div class="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50">
+                        <div class="flex items-center">
+                            <img src="{{ $restaurant->logo ? asset('storage/' . $restaurant->logo) : 'https://ui-avatars.com/api/?name=' . urlencode($restaurant->nom) }}" 
+                                 class="w-10 h-10 rounded-full mr-3">
+                            <div>
+                                <p class="font-semibold">{{ $restaurant->nom }}</p>
+                                <p class="text-xs text-gray-500">{{ $restaurant->ville }}</p>
+                            </div>
+                        </div>
+                        <x-badge-statut :statut="$restaurant->statut" />
+                    </div>
+                @empty
+                    <x-empty-state icon="🏪" title="Aucun restaurant" />
+                @endforelse
+            </div>
+        </div>
+
+        {{-- Activité récente --}}
+        <div class="bg-white rounded-xl shadow-sm p-6">
+            <h3 class="text-lg font-bold mb-4">Activité récente</h3>
+            <div class="space-y-3">
+                @forelse($activitesRecentes as $activite)
+                    <div class="flex items-start p-3 border-l-4 border-orange-500 bg-orange-50 rounded">
+                        <div class="flex-1">
+                            <p class="text-sm"><strong>{{ $activite->utilisateur?->nom_complet ?? 'Système' }}</strong></p>
+                            <p class="text-xs text-gray-600">{{ $activite->action }} sur {{ $activite->entite_type }}</p>
+                            <p class="text-xs text-gray-400 mt-1">{{ $activite->cree_le->diffForHumans() }}</p>
+                        </div>
+                    </div>
+                @empty
+                    <x-empty-state icon="📭" title="Aucune activité" />
+                @endforelse
+            </div>
+        </div>
+    </div>
+@endsection
+```
+
+### 6.2 `resources/views/superadmin/restaurants/index.blade.php`
+
+```blade
+@extends('layouts.superadmin')
+@section('title', 'Restaurants')
+@section('header', 'Gestion des restaurants')
+
+@section('content')
+    <div class="flex justify-between items-center mb-6">
+        <div>
+            <p class="text-gray-600">{{ $restaurants->total() }} restaurants au total</p>
+        </div>
+        <a href="{{ route('superadmin.restaurants.create') }}" class="bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700">
+            + Nouveau restaurant
+        </a>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Restaurant</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ville</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Note</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Statut</th>
+                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+                @forelse($restaurants as $restaurant)
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-6 py-4">
+                            <div class="flex items-center">
+                                <img src="{{ $restaurant->logo ? asset('storage/' . $restaurant->logo) : 'https://ui-avatars.com/api/?name=' . urlencode($restaurant->nom) }}" 
+                                     class="w-10 h-10 rounded-full mr-3">
+                                <div>
+                                    <p class="font-semibold">{{ $restaurant->nom }}</p>
+                                    <p class="text-xs text-gray-500">{{ $restaurant->email }}</p>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 text-sm">{{ $restaurant->ville }}</td>
+                        <td class="px-6 py-4">
+                            <span class="text-yellow-500">⭐</span>
+                            <span class="font-semibold">{{ number_format($restaurant->note, 1) }}</span>
+                            <span class="text-xs text-gray-500">({{ $restaurant->total_avis }})</span>
+                        </td>
+                        <td class="px-6 py-4">
+                            <x-badge-statut :statut="$restaurant->statut" />
+                        </td>
+                        <td class="px-6 py-4 text-right space-x-2">
+                            <a href="{{ route('superadmin.restaurants.show', $restaurant) }}" class="text-blue-600 hover:underline">Voir</a>
+                            <a href="{{ route('superadmin.restaurants.edit', $restaurant) }}" class="text-orange-600 hover:underline">Modifier</a>
+                            <form action="{{ route('superadmin.restaurants.destroy', $restaurant) }}" method="POST" class="inline" 
+                                  onsubmit="return confirm('Supprimer ce restaurant ?')">
+                                @csrf @method('DELETE')
+                                <button type="submit" class="text-red-600 hover:underline">Supprimer</button>
+                            </form>
+                        </td>
+                    </tr>
+                @empty
+                    <tr>
+                        <td colspan="5">
+                            <x-empty-state icon="🏪" title="Aucun restaurant" description="Commencez par créer votre premier restaurant" />
+                        </td>
+                    </tr>
+                @endforelse
+            </tbody>
+        </table>
+    </div>
+
+    <div class="mt-6">
+        {{ $restaurants->links() }}
+    </div>
+@endsection
+```
+
+### 6.3 `resources/views/superadmin/restaurants/create.blade.php`
+
+```blade
+@extends('layouts.superadmin')
+@section('title', 'Nouveau restaurant')
+@section('header', 'Créer un restaurant')
+
+@section('content')
+    <div class="max-w-3xl mx-auto">
+        <form action="{{ route('superadmin.restaurants.store') }}" method="POST" enctype="multipart/form-data" class="bg-white rounded-xl shadow-sm p-8 space-y-6">
+            @csrf
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Nom du restaurant *</label>
+                <input type="text" name="nom_fr" value="{{ old('nom_fr') }}" required
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                @error('nom_fr') <p class="text-red-500 text-sm mt-1">{{ $message }}</p> @enderror
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Téléphone *</label>
+                    <input type="tel" name="telephone" value="{{ old('telephone') }}" required
+                           class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+                    <input type="email" name="email" value="{{ old('email') }}" required
+                           class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Adresse *</label>
+                <input type="text" name="adresse" value="{{ old('adresse') }}" required
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+            </div>
+
+            <div class="grid grid-cols-3 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Ville *</label>
+                    <input type="text" name="ville" value="{{ old('ville', 'Abidjan') }}" required
+                           class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Latitude *</label>
+                    <input type="number" step="0.000001" name="latitude" value="{{ old('latitude') }}" required
+                           class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Longitude *</label>
+                    <input type="number" step="0.000001" name="longitude" value="{{ old('longitude') }}" required
+                           class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <textarea name="description_fr" rows="3"
+                          class="w-full px-4 py-2 border border-gray-300 rounded-lg">{{ old('description_fr') }}</textarea>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Logo</label>
+                    <input type="file" name="logo" accept="image/*"
+                           class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Image de couverture</label>
+                    <input type="file" name="image_couverture" accept="image/*"
+                           class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+            </div>
+
+            <div class="border-t pt-6">
+                <h3 class="font-bold text-lg mb-4">Configuration</h3>
+                <div class="grid grid-cols-2 gap-4">
+                    <label class="flex items-center">
+                        <input type="checkbox" name="livraison_activee" value="1" checked class="rounded text-orange-600">
+                        <span class="ml-2">Livraison activée</span>
+                    </label>
+                    <label class="flex items-center">
+                        <input type="checkbox" name="retrait_active" value="1" checked class="rounded text-orange-600">
+                        <span class="ml-2">Retrait sur place activé</span>
+                    </label>
+                    <label class="flex items-center">
+                        <input type="checkbox" name="sur_place_active" value="1" checked class="rounded text-orange-600">
+                        <span class="ml-2">Consommation sur place activée</span>
+                    </label>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4 mt-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Montant minimum commande (FCFA)</label>
+                        <input type="number" name="montant_minimum_commande" value="{{ old('montant_minimum_commande', 3000) }}"
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Rayon max livraison (km)</label>
+                        <input type="number" name="rayon_max_livraison" value="{{ old('rayon_max_livraison', 10) }}"
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-3 pt-6 border-t">
+                <a href="{{ route('superadmin.restaurants.index') }}" class="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">
+                    Annuler
+                </a>
+                <button type="submit" class="px-6 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700">
+                    Créer le restaurant
+                </button>
+            </div>
+        </form>
+    </div>
+@endsection
+```
+
+---
+
+## 🍳 7. ESPACE GÉRANT
+
+### 7.1 `resources/views/gerant/dashboard.blade.php`
+
+```blade
+@extends('layouts.gerant')
+@section('title', 'Tableau de bord')
+@section('header', 'Tableau de bord')
+
+@section('content')
+    {{-- Stats rapides --}}
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <x-stats-card title="CA du jour" :value="number_format($stats['ca_jour'], 0, ',', ' ') . ' F'" icon="💰" color="green" :trend="$stats['ca_trend']" />
+        <x-stats-card title="Commandes" :value="$stats['commandes_jour']" icon="📋" color="blue" :trend="$stats['commandes_trend']" />
+        <x-stats-card title="En cours" :value="$stats['commandes_en_cours']" icon="⏳" color="orange" />
+        <x-stats-card title="Note moyenne" :value="'⭐ ' . number_format($restaurant->note, 1)" icon="⭐" color="purple" />
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {{-- Commandes en cours --}}
+        <div class="lg:col-span-2 bg-white rounded-xl shadow-sm p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold">Commandes en cours</h3>
+                <a href="{{ route('gerant.commandes.kitchen') }}" class="text-orange-600 hover:underline text-sm">
+                    🍳 Écran cuisine
+                </a>
+            </div>
+            <div class="space-y-3">
+                @forelse($commandesEnCours as $commande)
+                    <div class="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50">
+                        <div>
+                            <p class="font-bold">#{{ $commande->numero }}</p>
+                            <p class="text-sm text-gray-600">
+                                {{ $commande->type_commande->label() }} • 
+                                {{ $commande->lignes->count() }} article(s) •
+                                {{ number_format($commande->montant_total, 0, ',', ' ') }} F
+                            </p>
+                            <p class="text-xs text-gray-500 mt-1">Il y a {{ $commande->cree_le->diffForHumans() }}</p>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <x-badge-statut :statut="$commande->statut->value" />
+                            <a href="{{ route('gerant.commandes.show', $commande) }}" class="text-orange-600 hover:underline">Voir</a>
+                        </div>
+                    </div>
+                @empty
+                    <x-empty-state icon="✅" title="Aucune commande en cours" description="Les nouvelles commandes apparaîtront ici en temps réel" />
+                @endforelse
+            </div>
+        </div>
+
+        {{-- Réservations du jour --}}
+        <div class="bg-white rounded-xl shadow-sm p-6">
+            <h3 class="text-lg font-bold mb-4">Réservations du jour</h3>
+            <div class="space-y-3">
+                @forelse($reservationsDuJour as $reservation)
+                    <div class="p-3 border-l-4 border-orange-500 bg-orange-50 rounded">
+                        <p class="font-semibold">{{ $reservation->nom_client }}</p>
+                        <p class="text-sm text-gray-600">
+                            🕐 {{ \Carbon\Carbon::parse($reservation->heure_reservation)->format('H:i') }} •
+                            👥 {{ $reservation->nombre_personnes }} pers.
+                        </p>
+                        <x-badge-statut :statut="$reservation->statut" />
+                    </div>
+                @empty
+                    <x-empty-state icon="📅" title="Aucune réservation" />
+                @endforelse
+            </div>
+        </div>
+    </div>
+@endsection
+```
+
+### 7.2 `resources/views/gerant/commandes/kitchen.blade.php` (Écran cuisine temps réel)
+
+```blade
+@extends('layouts.gerant')
+@section('title', 'Écran cuisine')
+@section('header', '🍳 Écran cuisine')
+
+@section('content')
+    <div class="mb-4 flex justify-between items-center">
+        <p class="text-gray-600">
+            <span class="inline-block w-3 h-3 bg-green-500 rounded-full animate-pulse mr-2"></span>
+            Temps réel activé
+        </p>
+        <button onclick="playSound()" class="text-orange-600 hover:underline">🔔 Tester le son</button>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="kitchen-grid">
+        @forelse($commandes as $commande)
+            <div class="bg-white rounded-xl shadow-sm p-4 border-t-4 
+                {{ $commande->statut->value === 'en_attente' ? 'border-yellow-500' : 'border-blue-500' }}"
+                 wire:key="commande-{{ $commande->id }}"
+                 id="commande-{{ $commande->id }}">
+                
+                <div class="flex justify-between items-start mb-3">
+                    <div>
+                        <h3 class="text-xl font-bold">#{{ $commande->numero }}</h3>
+                        <p class="text-sm text-gray-500">{{ $commande->cree_le->format('H:i') }}</p>
+                    </div>
+                    <x-badge-statut :statut="$commande->statut->value" />
+                </div>
+
+                @if($commande->table)
+                    <p class="text-sm text-orange-600 font-semibold mb-2">🪑 Table {{ $commande->table->numero_table }}</p>
+                @endif
+
+                <ul class="space-y-2 mb-4">
+                    @foreach($commande->lignes as $ligne)
+                        <li class="flex justify-between items-start pb-2 border-b">
+                            <div>
+                                <span class="font-bold text-lg">{{ $ligne->quantite }}x</span>
+                                <span class="ml-2">{{ $ligne->produit->nom }}</span>
+                                @if($ligne->notes)
+                                    <p class="text-xs text-red-600 mt-1">⚠️ {{ $ligne->notes }}</p>
+                                @endif
+                            </div>
+                        </li>
+                    @endforeach
+                </ul>
+
+                <div class="flex space-x-2">
+                    @if($commande->statut->value === 'en_attente')
+                        <form action="{{ route('gerant.commandes.statut', $commande) }}" method="POST" class="flex-1">
+                            @csrf @method('PATCH')
+                            <input type="hidden" name="statut" value="confirmee">
+                            <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700">
+                                ✓ Accepter
+                            </button>
+                        </form>
+                    @elseif($commande->statut->value === 'confirmee')
+                        <form action="{{ route('gerant.commandes.statut', $commande) }}" method="POST" class="flex-1">
+                            @csrf @method('PATCH')
+                            <input type="hidden" name="statut" value="en_preparation">
+                            <button type="submit" class="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700">
+                                🍳 En cuisine
+                            </button>
+                        </form>
+                    @elseif($commande->statut->value === 'en_preparation')
+                        <form action="{{ route('gerant.commandes.statut', $commande) }}" method="POST" class="flex-1">
+                            @csrf @method('PATCH')
+                            <input type="hidden" name="statut" value="prete">
+                            <button type="submit" class="w-full bg-green-600 text-white py-2 rounded-lg hover:bg-green-700">
+                                ✅ Prête !
+                            </button>
+                        </form>
+                    @endif
+                </div>
+            </div>
+        @empty
+            <div class="col-span-3">
+                <x-empty-state icon="🍳" title="Aucune commande en cuisine" description="Les nouvelles commandes apparaîtront automatiquement" />
+            </div>
+        @endforelse
+    </div>
+
+    {{-- Son de notification --}}
+    <audio id="notification-sound" src="{{ asset('sounds/notification.mp3') }}"></audio>
+@endsection
+
+@push('scripts')
+<script>
+    function playSound() {
+        document.getElementById('notification-sound').play();
+    }
+
+    // Écouter les nouvelles commandes en temps réel
+    window.Echo.private(`restaurant.{{ auth()->user()->profilGerant->restaurant_id }}`)
+        .listen('.commande.recue', (e) => {
+            playSound();
+            // Recharger la page pour afficher la nouvelle commande
+            // (ou utiliser Livewire pour un update sans refresh)
+            window.location.reload();
+        })
+        .listen('.commande.statut.modifie', (e) => {
+            // Animation visuelle quand un statut change
+            const card = document.getElementById(`commande-${e.commande_id}`);
+            if (card) {
+                card.classList.add('animate-pulse');
+                setTimeout(() => card.classList.remove('animate-pulse'), 2000);
+            }
+        });
+</script>
+@endpush
+```
+
+### 7.3 `resources/views/gerant/produits/index.blade.php`
+
+```blade
+@extends('layouts.gerant')
+@section('title', 'Produits')
+@section('header', 'Gestion des produits')
+
+@section('content')
+    <div class="flex justify-between items-center mb-6">
+        <div class="flex space-x-2">
+            <a href="{{ route('gerant.produits.index') }}" class="px-4 py-2 bg-orange-600 text-white rounded-lg">Tous</a>
+            <a href="{{ route('gerant.produits.index', ['disponible' => 1]) }}" class="px-4 py-2 bg-white border rounded-lg hover:bg-gray-50">Disponibles</a>
+            <a href="{{ route('gerant.produits.index', ['rupture' => 1]) }}" class="px-4 py-2 bg-white border rounded-lg hover:bg-gray-50">En rupture</a>
+        </div>
+        <a href="{{ route('gerant.produits.create') }}" class="bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700">
+            + Nouveau produit
+        </a>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        @forelse($produits as $produit)
+            <div class="bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-lg transition">
+                <div class="relative">
+                    @if($produit->imagePrincipale)
+                        <img src="{{ asset('storage/' . $produit->imagePrincipale->chemin_image) }}" 
+                             alt="{{ $produit->nom }}" class="w-full h-48 object-cover">
+                    @else
+                        <div class="w-full h-48 bg-gray-200 flex items-center justify-center text-6xl">🍽️</div>
+                    @endif
+                    
+                    @if($produit->est_en_promotion())
+                        <span class="absolute top-2 right-2 bg-red-500 text-white text-xs px-2 py-1 rounded">PROMO</span>
+                    @endif
+                    
+                    @if(!$produit->est_disponible)
+                        <div class="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                            <span class="text-white font-bold">INDISPONIBLE</span>
+                        </div>
+                    @endif
+                </div>
+
+                <div class="p-4">
+                    <div class="flex justify-between items-start mb-2">
+                        <h3 class="font-bold text-lg">{{ $produit->nom }}</h3>
+                        <span class="text-xs bg-gray-100 px-2 py-1 rounded">{{ $produit->categorie->nom }}</span>
+                    </div>
+
+                    <p class="text-gray-600 text-sm mb-3 line-clamp-2">{{ Str::limit($produit->description, 80) }}</p>
+
+                    <div class="flex items-center justify-between mb-3">
+                        <div>
+                            @if($produit->est_en_promotion())
+                                <span class="text-xl font-bold text-orange-600">{{ number_format($produit->prix_promo, 0, ',', ' ') }} F</span>
+                                <span class="text-sm text-gray-400 line-through ml-2">{{ number_format($produit->prix_base, 0, ',', ' ') }} F</span>
+                            @else
+                                <span class="text-xl font-bold text-orange-600">{{ number_format($produit->prix_base, 0, ',', ' ') }} F</span>
+                            @endif
+                        </div>
+                        @if($produit->quantite_stock !== null)
+                            <span class="text-xs {{ $produit->quantite_stock < 5 ? 'text-red-600' : 'text-gray-600' }}">
+                                Stock: {{ $produit->quantite_stock }}
+                            </span>
+                        @endif
+                    </div>
+
+                    <div class="flex space-x-2">
+                        <a href="{{ route('gerant.produits.show', $produit) }}" class="flex-1 text-center bg-gray-100 text-gray-700 py-2 rounded-lg hover:bg-gray-200">
+                            Voir
+                        </a>
+                        <a href="{{ route('gerant.produits.edit', $produit) }}" class="flex-1 text-center bg-orange-600 text-white py-2 rounded-lg hover:bg-orange-700">
+                            Modifier
+                        </a>
+                    </div>
+                </div>
+            </div>
+        @empty
+            <div class="col-span-3">
+                <x-empty-state icon="🍔" title="Aucun produit" description="Commencez par créer votre premier produit"
+                    :action="'<a href=\"' . route('gerant.produits.create') . '\" class=\"bg-orange-600 text-white px-6 py-2 rounded-lg\">+ Créer un produit</a>'" />
+            </div>
+        @endforelse
+    </div>
+
+    <div class="mt-6">{{ $produits->links() }}</div>
+@endsection
+```
+
+### 7.4 `resources/views/gerant/produits/create.blade.php`
+
+```blade
+@extends('layouts.gerant')
+@section('title', 'Nouveau produit')
+@section('header', 'Créer un produit')
+
+@section('content')
+    <form action="{{ route('gerant.produits.store') }}" method="POST" enctype="multipart/form-data" class="max-w-4xl mx-auto bg-white rounded-xl shadow-sm p-8">
+        @csrf
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {{-- Colonne gauche : Infos --}}
+            <div class="space-y-4">
+                <h3 class="font-bold text-lg border-b pb-2">Informations générales</h3>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Nom (français) *</label>
+                    <input type="text" name="nom_fr" value="{{ old('nom_fr') }}" required
+                           class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                    @error('nom_fr') <p class="text-red-500 text-sm mt-1">{{ $message }}</p> @enderror
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Nom (anglais)</label>
+                    <input type="text" name="nom_en" value="{{ old('nom_en') }}"
+                           class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Catégorie *</label>
+                    <select name="categorie_id" required class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                        <option value="">-- Sélectionner --</option>
+                        @foreach($categories as $categorie)
+                            <option value="{{ $categorie->id }}" {{ old('categorie_id') == $categorie->id ? 'selected' : '' }}>
+                                {{ $categorie->nom }}
+                            </option>
+                        @endforeach
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Description (français)</label>
+                    <textarea name="description_fr" rows="3"
+                              class="w-full px-4 py-2 border border-gray-300 rounded-lg">{{ old('description_fr') }}</textarea>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Prix de base (FCFA) *</label>
+                        <input type="number" name="prix_base" value="{{ old('prix_base') }}" required min="0"
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Prix promo (FCFA)</label>
+                        <input type="number" name="prix_promo" value="{{ old('prix_promo') }}" min="0"
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Calories</label>
+                        <input type="number" name="calories" value="{{ old('calories') }}"
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Temps préparation (min)</label>
+                        <input type="number" name="temps_preparation" value="{{ old('temps_preparation', 20) }}"
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                    </div>
+                </div>
+            </div>
+
+            {{-- Colonne droite : Options & Images --}}
+            <div class="space-y-4">
+                <h3 class="font-bold text-lg border-b pb-2">Options & Images</h3>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Images du produit</label>
+                    <input type="file" name="images[]" multiple accept="image/*"
+                           class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                    <p class="text-xs text-gray-500 mt-1">Maximum 10 images, 5 Mo chacune</p>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Régimes alimentaires</label>
+                    <div class="space-y-2">
+                        @foreach(['est_vegetarien' => '🥬 Végétarien', 'est_vegan' => '🌱 Vegan', 'est_sans_gluten' => '🌾 Sans gluten', 'est_halal' => '☪️ Halal', 'est_epice' => '🌶️ Épicé'] as $key => $label)
+                            <label class="flex items-center">
+                                <input type="checkbox" name="{{ $key }}" value="1" {{ old($key) ? 'checked' : '' }}
+                                       class="rounded text-orange-600">
+                                <span class="ml-2">{{ $label }}</span>
+                            </label>
+                        @endforeach
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Allergènes</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        @foreach(\App\Models\Allergene::all() as $allergene)
+                            <label class="flex items-center">
+                                <input type="checkbox" name="allergenes[]" value="{{ $allergene->id }}"
+                                       class="rounded text-orange-600">
+                                <span class="ml-2">{{ $allergene->icone }} {{ $allergene->nom }}</span>
+                            </label>
+                        @endforeach
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Tags (séparés par des virgules)</label>
+                    <input type="text" name="tags" value="{{ old('tags') }}" placeholder="populaire, nouveau, chef"
+                           class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Stock (laisser vide pour illimité)</label>
+                    <input type="number" name="quantite_stock" value="{{ old('quantite_stock') }}" min="0"
+                           class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+            </div>
+        </div>
+
+        <div class="flex justify-end space-x-3 mt-8 pt-6 border-t">
+            <a href="{{ route('gerant.produits.index') }}" class="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">
+                Annuler
+            </a>
+            <button type="submit" class="px-6 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700">
+                Créer le produit
+            </button>
+        </div>
+    </form>
+@endsection
+```
+
+---
+
+## 🛵 8. ESPACE LIVREUR
+
+### 8.1 `resources/views/livreur/dashboard.blade.php`
+
+```blade
+@extends('layouts.livreur')
+@section('title', 'Tableau de bord')
+@section('header', 'Bonjour ' . auth()->user()->prenom . ' 👋')
+
+@section('content')
+    {{-- Toggle disponibilité --}}
+    <div class="bg-white rounded-xl shadow-sm p-6 mb-6">
+        <div class="flex items-center justify-between">
+            <div>
+                <h3 class="text-xl font-bold">Votre disponibilité</h3>
+                <p class="text-gray-600">
+                    @if(auth()->user()->profilLivreur->est_disponible)
+                        <span class="text-green-600">● Vous êtes disponible pour recevoir des missions</span>
+                    @else
+                        <span class="text-red-600">● Vous êtes hors ligne</span>
+                    @endif
+                </p>
+            </div>
+            <form action="{{ route('livreur.disponibilite') }}" method="POST">
+                @csrf @method('PATCH')
+                <button type="submit" 
+                        class="px-6 py-3 rounded-lg font-semibold {{ auth()->user()->profilLivreur->est_disponible ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700' }} text-white">
+                    {{ auth()->user()->profilLivreur->est_disponible ? '🔴 Se déconnecter' : '🟢 Se connecter' }}
+                </button>
+            </form>
+        </div>
+    </div>
+
+    {{-- Stats --}}
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+        <x-stats-card title="Gains du jour" :value="number_format($stats['gains_jour'], 0, ',', ' ') . ' F'" icon="💰" color="green" />
+        <x-stats-card title="Livraisons du jour" :value="$stats['livraisons_jour']" icon="📦" color="blue" />
+        <x-stats-card title="Note moyenne" :value="'⭐ ' . number_format(auth()->user()->profilLivreur->note, 1)" icon="⭐" color="orange" />
+        <x-stats-card title="Total livraisons" :value="auth()->user()->profilLivreur->total_livraisons" icon="🏆" color="purple" />
+    </div>
+
+    {{-- Mission en cours --}}
+    @if($missionEnCours)
+        <div class="bg-gradient-to-br from-orange-500 to-red-600 text-white rounded-xl shadow-lg p-6 mb-6">
+            <h3 class="text-2xl font-bold mb-4">🚀 Mission en cours</h3>
+            <div class="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                    <p class="text-sm opacity-80">Commande</p>
+                    <p class="text-xl font-bold">#{{ $missionEnCours->commande->numero }}</p>
+                </div>
+                <div>
+                    <p class="text-sm opacity-80">Montant</p>
+                    <p class="text-xl font-bold">{{ number_format($missionEnCours->commande->montant_total, 0, ',', ' ') }} F</p>
+                </div>
+            </div>
+            <div class="bg-white bg-opacity-20 rounded-lg p-4 mb-4">
+                <p class="text-sm">📍 Adresse de livraison</p>
+                <p class="font-semibold">{{ $missionEnCours->commande->adresseLivraison->adresse_complete }}</p>
+                @if($missionEnCours->commande->adresseLivraison->instructions_livraison)
+                    <p class="text-sm mt-2">💬 {{ $missionEnCours->commande->adresseLivraison->instructions_livraison }}</p>
+                @endif
+            </div>
+            <a href="{{ route('livreur.livraisons.show', $missionEnCours) }}" class="block text-center bg-white text-orange-600 py-3 rounded-lg font-bold hover:bg-gray-100">
+                Voir les détails →
+            </a>
+        </div>
+    @else
+        <div class="bg-white rounded-xl shadow-sm p-6 mb-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold">Missions disponibles</h3>
+                <a href="{{ route('livreur.livraisons.disponibles') }}" class="text-orange-600 hover:underline">Voir tout →</a>
+            </div>
+            @forelse($missionsDisponibles as $mission)
+                <div class="flex items-center justify-between p-4 border rounded-lg mb-2 hover:bg-gray-50">
+                    <div>
+                        <p class="font-bold">#{{ $mission->commande->numero }}</p>
+                        <p class="text-sm text-gray-600">{{ $mission->commande->restaurant->nom }}</p>
+                        <p class="text-xs text-gray-500">📍 {{ $mission->commande->adresseLivraison->ville }}</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-xl font-bold text-green-600">{{ number_format($mission->commission_livreur, 0, ',', ' ') }} F</p>
+                        <form action="{{ route('livreur.livraisons.accepter', $mission) }}" method="POST" class="mt-2">
+                            @csrf
+                            <button type="submit" class="bg-orange-600 text-white px-4 py-1 rounded-lg hover:bg-orange-700 text-sm">
+                                Accepter
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            @empty
+                <x-empty-state icon="📭" title="Aucune mission disponible" description="De nouvelles missions apparaîtront bientôt" />
+            @endforelse
+        </div>
+    @endif
+@endsection
+```
+
+### 8.2 `resources/views/livreur/livraisons/show.blade.php` (Suivi détaillé)
+
+```blade
+@extends('layouts.livreur')
+@section('title', 'Livraison #' . $livraison->commande->numero)
+@section('header', 'Livraison #' . $livraison->commande->numero)
+
+@section('content')
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {{-- Colonne gauche : Détails --}}
+        <div class="lg:col-span-2 space-y-6">
+            {{-- Statut actuel --}}
+            <div class="bg-white rounded-xl shadow-sm p-6">
+                <h3 class="font-bold text-lg mb-4">Progression</h3>
+                <div class="flex items-center justify-between">
+                    @php
+                        $etapes = [
+                            'assignee' => ['icon' => '✅', 'label' => 'Assignée'],
+                            'en_route_restaurant' => ['icon' => '🚗', 'label' => 'En route restaurant'],
+                            'recuperee' => ['icon' => '📦', 'label' => 'Commande récupérée'],
+                            'en_livraison' => ['icon' => '🛵', 'label' => 'En livraison'],
+                            'livree' => ['icon' => '🏁', 'label' => 'Livrée'],
+                        ];
+                        $ordre = array_keys($etapes);
+                        $indexActuel = array_search($livraison->statut, $ordre);
+                    @endphp
+                    @foreach($etapes as $key => $etape)
+                        <div class="flex-1 text-center {{ array_search($key, $ordre) <= $indexActuel ? 'text-green-600' : 'text-gray-300' }}">
+                            <div class="text-3xl">{{ $etape['icon'] }}</div>
+                            <p class="text-xs mt-1">{{ $etape['label'] }}</p>
+                        </div>
+                    @endforeach
+                </div>
+            </div>
+
+            {{-- Carte --}}
+            <div class="bg-white rounded-xl shadow-sm p-6">
+                <h3 class="font-bold text-lg mb-4">📍 Itinéraire</h3>
+                <div id="map" style="height: 400px;" class="rounded-lg"></div>
+            </div>
+
+            {{-- Actions --}}
+            @if($livraison->statut !== 'livree')
+                <div class="bg-white rounded-xl shadow-sm p-6">
+                    <h3 class="font-bold text-lg mb-4">Actions</h3>
+                    <div class="grid grid-cols-2 gap-4">
+                        @if($livraison->statut === 'assignee')
+                            <form action="{{ route('livreur.livraisons.statut', $livraison) }}" method="POST">
+                                @csrf @method('PATCH')
+                                <input type="hidden" name="statut" value="en_route_restaurant">
+                                <button class="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700">
+                                    🚗 Je me rends au restaurant
+                                </button>
+                            </form>
+                        @elseif($livraison->statut === 'en_route_restaurant')
+                            <form action="{{ route('livreur.livraisons.statut', $livraison) }}" method="POST">
+                                @csrf @method('PATCH')
+                                <input type="hidden" name="statut" value="recuperee">
+                                <button class="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700">
+                                    📦 J'ai récupéré la commande
+                                </button>
+                            </form>
+                        @elseif($livraison->statut === 'recuperee')
+                            <form action="{{ route('livreur.livraisons.statut', $livraison) }}" method="POST">
+                                @csrf @method('PATCH')
+                                <input type="hidden" name="statut" value="en_livraison">
+                                <button class="w-full bg-purple-600 text-white py-3 rounded-lg hover:bg-purple-700">
+                                    🛵 Je suis en route chez le client
+                                </button>
+                            </form>
+                        @elseif($livraison->statut === 'en_livraison')
+                            <button onclick="document.getElementById('modal-preuve').showModal()" 
+                                    class="w-full bg-green-600 text-white py-3 rounded-lg hover:bg-green-700">
+                                ✅ Confirmer la livraison
+                            </button>
+                        @endif
+                    </div>
+                </div>
+            @endif
+        </div>
+
+        {{-- Colonne droite : Infos --}}
+        <div class="space-y-6">
+            {{-- Restaurant --}}
+            <div class="bg-white rounded-xl shadow-sm p-6">
+                <h3 class="font-bold text-lg mb-3">🏪 Restaurant</h3>
+                <p class="font-semibold">{{ $livraison->commande->restaurant->nom }}</p>
+                <p class="text-sm text-gray-600">{{ $livraison->commande->restaurant->adresse }}</p>
+                <a href="tel:{{ $livraison->commande->restaurant->telephone }}" 
+                   class="block mt-3 text-center bg-gray-100 py-2 rounded-lg hover:bg-gray-200">
+                    📞 Appeler
+                </a>
+            </div>
+
+            {{-- Client --}}
+            <div class="bg-white rounded-xl shadow-sm p-6">
+                <h3 class="font-bold text-lg mb-3">👤 Client</h3>
+                <p class="font-semibold">{{ $livraison->commande->client->utilisateur->nom_complet }}</p>
+                <p class="text-sm text-gray-600">{{ $livraison->commande->adresseLivraison->adresse_complete }}</p>
+                @if($livraison->commande->adresseLivraison->instructions_livraison)
+                    <p class="text-sm mt-2 text-orange-600">💬 {{ $livraison->commande->adresseLivraison->instructions_livraison }}</p>
+                @endif
+                <a href="tel:{{ $livraison->commande->client->utilisateur->telephone }}" 
+                   class="block mt-3 text-center bg-gray-100 py-2 rounded-lg hover:bg-gray-200">
+                    📞 Appeler le client
+                </a>
+            </div>
+
+            {{-- Commande --}}
+            <div class="bg-white rounded-xl shadow-sm p-6">
+                <h3 class="font-bold text-lg mb-3">📋 Contenu</h3>
+                <ul class="space-y-2">
+                    @foreach($livraison->commande->lignes as $ligne)
+                        <li class="flex justify-between text-sm">
+                            <span>{{ $ligne->quantite }}x {{ $ligne->produit->nom }}</span>
+                            <span class="font-semibold">{{ number_format($ligne->prix_total_ligne, 0, ',', ' ') }} F</span>
+                        </li>
+                    @endforeach
+                </ul>
+                <div class="border-t mt-3 pt-3">
+                    <div class="flex justify-between font-bold">
+                        <span>Total</span>
+                        <span>{{ number_format($livraison->commande->montant_total, 0, ',', ' ') }} F</span>
+                    </div>
+                    @if($livraison->commande->paiement && $livraison->commande->paiement->methode_paiement->value === 'especes_livraison')
+                        <p class="text-sm text-red-600 mt-2">💵 À encaisser : ESPÈCES</p>
+                    @endif
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {{-- Modal preuve de livraison --}}
+    <dialog id="modal-preuve" class="rounded-xl p-0 max-w-md w-full">
+        <form action="{{ route('livreur.livraisons.preuve', $livraison) }}" method="POST" enctype="multipart/form-data" class="p-6">
+            @csrf
+            <h3 class="text-xl font-bold mb-4">Preuve de livraison</h3>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium mb-2">Type de preuve</label>
+                    <select name="type_preuve" required class="w-full px-4 py-2 border rounded-lg">
+                        <option value="photo">📸 Photo</option>
+                        <option value="signature">✍️ Signature</option>
+                        <option value="code">🔢 Code de confirmation</option>
+                        <option value="gps">📍 GPS uniquement</option>
+                    </select>
+                </div>
+
+                <div id="champ-photo" class="hidden">
+                    <label class="block text-sm font-medium mb-2">Photo</label>
+                    <input type="file" name="photo" accept="image/*" class="w-full px-4 py-2 border rounded-lg">
+                </div>
+
+                <div id="champ-signature" class="hidden">
+                    <label class="block text-sm font-medium mb-2">Signature</label>
+                    <canvas id="signature-pad" width="300" height="150" class="border rounded-lg w-full"></canvas>
+                    <input type="hidden" name="signature">
+                </div>
+
+                <div id="champ-code" class="hidden">
+                    <label class="block text-sm font-medium mb-2">Code de confirmation</label>
+                    <input type="text" name="code" class="w-full px-4 py-2 border rounded-lg">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium mb-2">Nom du destinataire</label>
+                    <input type="text" name="nom_destinataire" class="w-full px-4 py-2 border rounded-lg">
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-3 mt-6">
+                <button type="button" onclick="document.getElementById('modal-preuve').close()" class="px-4 py-2 border rounded-lg">
+                    Annuler
+                </button>
+                <button type="submit" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                    Confirmer
+                </button>
+            </div>
+        </form>
+    </dialog>
+@endsection
+
+@push('scripts')
+<script>
+    // Gestion des champs conditionnels
+    document.querySelector('[name="type_preuve"]').addEventListener('change', function() {
+        document.getElementById('champ-photo').classList.add('hidden');
+        document.getElementById('champ-signature').classList.add('hidden');
+        document.getElementById('champ-code').classList.add('hidden');
+        
+        if (this.value === 'photo') document.getElementById('champ-photo').classList.remove('hidden');
+        if (this.value === 'signature') document.getElementById('champ-signature').classList.remove('hidden');
+        if (this.value === 'code') document.getElementById('champ-code').classList.remove('hidden');
+    });
+
+    // Carte Leaflet
+    const map = L.map('map').setView([{{ $livraison->commande->restaurant->latitude }}, {{ $livraison->commande->restaurant->longitude }}], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    
+    // Marqueur restaurant
+    L.marker([{{ $livraison->commande->restaurant->latitude }}, {{ $livraison->commande->restaurant->longitude }}])
+        .addTo(map).bindPopup('🏪 Restaurant');
+    
+    // Marqueur client
+    L.marker([{{ $livraison->commande->adresseLivraison->latitude }}, {{ $livraison->commande->adresseLivraison->longitude }}])
+        .addTo(map).bindPopup('👤 Client');
+
+    // Envoyer la position toutes les 10 secondes
+    @if($livraison->statut !== 'livree')
+    navigator.geolocation.watchPosition(async (position) => {
+        await fetch('{{ route("livreur.livraisons.localisation", $livraison) }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': '{{ csrf_token() }}'
+            },
+            body: JSON.stringify({
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude,
+                vitesse: position.coords.speed
+            })
+        });
+    }, { enableHighAccuracy: true });
+    @endif
+</script>
+@endpush
+```
+
+---
+
+## 🛒 9. ESPACE CLIENT
+
+### 9.1 `resources/views/client/restaurants/index.blade.php`
+
+```blade
+@extends('layouts.app')
+@section('title', 'Restaurants')
+
+@section('content')
+    <div class="max-w-7xl mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold mb-6">🍽️ Nos restaurants</h1>
+
+        {{-- Filtres --}}
+        <div class="bg-white rounded-xl shadow-sm p-4 mb-6 flex flex-wrap gap-4">
+            <input type="text" placeholder="🔍 Rechercher..." class="flex-1 min-w-[200px] px-4 py-2 border rounded-lg">
+            <select class="px-4 py-2 border rounded-lg">
+                <option>Tous les quartiers</option>
+                <option>Cocody</option>
+                <option>Plateau</option>
+                <option>Marcory</option>
+                <option>Yopougon</option>
+            </select>
+            <label class="flex items-center">
+                <input type="checkbox" class="rounded text-orange-600">
+                <span class="ml-2">Ouverts maintenant</span>
+            </label>
+            <label class="flex items-center">
+                <input type="checkbox" class="rounded text-orange-600">
+                <span class="ml-2">Livraison</span>
+            </label>
+        </div>
+
+        {{-- Liste --}}
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            @forelse($restaurants as $restaurant)
+                <x-card-restaurant :restaurant="$restaurant" />
+            @empty
+                <x-empty-state icon="🍽️" title="Aucun restaurant trouvé" description="Essayez d'autres filtres" />
+            @endforelse
+        </div>
+
+        <div class="mt-8">{{ $restaurants->links() }}</div>
+    </div>
+@endsection
+```
+
+### 9.2 `resources/views/components/card-restaurant.blade.php`
+
+```blade
+@props(['restaurant'])
+
+<a href="{{ route('client.restaurants.show', $restaurant) }}" class="block bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-lg transition group">
+    <div class="relative h-48 overflow-hidden">
+        <img src="{{ $restaurant->image_couverture ? asset('storage/' . $restaurant->image_couverture) : 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=500' }}" 
+             alt="{{ $restaurant->nom }}" class="w-full h-full object-cover group-hover:scale-105 transition">
+        
+        @if($restaurant->est_en_avant)
+            <span class="absolute top-2 left-2 bg-orange-600 text-white text-xs px-2 py-1 rounded">⭐ En vedette</span>
+        @endif
+        
+        @if($restaurant->estOuvertMaintenant())
+            <span class="absolute top-2 right-2 bg-green-500 text-white text-xs px-2 py-1 rounded">🟢 Ouvert</span>
+        @else
+            <span class="absolute top-2 right-2 bg-red-500 text-white text-xs px-2 py-1 rounded">🔴 Fermé</span>
+        @endif
+    </div>
+
+    <div class="p-4">
+        <div class="flex justify-between items-start mb-2">
+            <h3 class="font-bold text-lg">{{ $restaurant->nom }}</h3>
+            <div class="flex items-center">
+                <span class="text-yellow-500">⭐</span>
+                <span class="font-semibold ml-1">{{ number_format($restaurant->note, 1) }}</span>
+                <span class="text-xs text-gray-500 ml-1">({{ $restaurant->total_avis }})</span>
+            </div>
+        </div>
+
+        <p class="text-sm text-gray-600 mb-3">📍 {{ $restaurant->ville }} • {{ $restaurant->adresse }}</p>
+
+        <div class="flex items-center justify-between text-sm">
+            <div class="flex space-x-3 text-gray-600">
+                @if($restaurant->livraison_activee) <span>🛵 Livraison</span> @endif
+                @if($restaurant->retrait_active) <span>📦 Retrait</span> @endif
+            </div>
+            <span class="text-orange-600 font-semibold">
+                {{ $restaurant->temps_preparation }} min
+            </span>
+        </div>
+    </div>
+</a>
+```
+
+### 9.3 `resources/views/client/restaurants/show.blade.php` (Menu du restaurant)
+
+```blade
+@extends('layouts.app')
+@section('title', $restaurant->nom)
+
+@section('content')
+    <div class="max-w-7xl mx-auto px-4 py-8">
+        {{-- Header restaurant --}}
+        <div class="bg-white rounded-xl shadow-sm overflow-hidden mb-6">
+            <div class="h-64 relative">
+                <img src="{{ $restaurant->image_couverture ? asset('storage/' . $restaurant->image_couverture) : 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1200' }}" 
+                     class="w-full h-full object-cover">
+                <div class="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent"></div>
+                <div class="absolute bottom-0 left-0 p-6 text-white">
+                    <h1 class="text-4xl font-bold mb-2">{{ $restaurant->nom }}</h1>
+                    <div class="flex items-center space-x-4 text-sm">
+                        <span>⭐ {{ number_format($restaurant->note, 1) }} ({{ $restaurant->total_avis }} avis)</span>
+                        <span>📍 {{ $restaurant->ville }}</span>
+                        <span>⏱️ {{ $restaurant->temps_preparation }} min</span>
+                        @if($restaurant->estOuvertMaintenant())
+                            <span class="bg-green-500 px-2 py-1 rounded">🟢 Ouvert</span>
+                        @else
+                            <span class="bg-red-500 px-2 py-1 rounded">🔴 Fermé</span>
+                        @endif
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-6 flex justify-between items-center">
+                <p class="text-gray-600">{{ $restaurant->description }}</p>
+                <div class="flex space-x-2">
+                    @if($restaurant->livraison_activee)
+                        <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm">🛵 Livraison</span>
+                    @endif
+                    @if($restaurant->retrait_active)
+                        <span class="bg-purple-100 text-purple-800 px-3 py-1 rounded-full text-sm">📦 Retrait</span>
+                    @endif
+                    @if($restaurant->sur_place_active)
+                        <span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm">🪑 Sur place</span>
+                    @endif
+                </div>
+            </div>
+        </div>
+
+        {{-- Menu --}}
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            {{-- Navigation catégories --}}
+            <div class="lg:col-span-1">
+                <div class="bg-white rounded-xl shadow-sm p-4 sticky top-24">
+                    <h3 class="font-bold mb-3">Catégories</h3>
+                    <nav class="space-y-1">
+                        @foreach($categories as $categorie)
+                            <a href="#cat-{{ $categorie->id }}" 
+                               class="block px-3 py-2 rounded-lg hover:bg-orange-50 text-gray-700 hover:text-orange-600">
+                                {{ $categorie->nom }}
+                                <span class="text-xs text-gray-500">({{ $categorie->produits->count() }})</span>
+                            </a>
+                        @endforeach
+                    </nav>
+                </div>
+            </div>
+
+            {{-- Produits --}}
+            <div class="lg:col-span-3 space-y-8">
+                @foreach($categories as $categorie)
+                    <div id="cat-{{ $categorie->id }}">
+                        <h2 class="text-2xl font-bold mb-4 sticky top-20 bg-gray-50 py-2">{{ $categorie->nom }}</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            @foreach($categorie->produits as $produit)
+                                <x-card-produit :produit="$produit" :restaurant="$restaurant" />
+                            @endforeach
+                        </div>
+                    </div>
+                @endforeach
+            </div>
+        </div>
+    </div>
+
+    {{-- Panier flottant --}}
+    @livewire('client.panier-flottant', ['restaurantId' => $restaurant->id])
+@endsection
+```
+
+### 9.4 `resources/views/components/card-produit.blade.php`
+
+```blade
+@props(['produit', 'restaurant'])
+
+<div class="bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-md transition">
+    <div class="flex">
+        <div class="w-32 h-32 flex-shrink-0">
+            @if($produit->imagePrincipale)
+                <img src="{{ asset('storage/' . $produit->imagePrincipale->chemin_image) }}" 
+                     alt="{{ $produit->nom }}" class="w-full h-full object-cover">
+            @else
+                <div class="w-full h-full bg-gray-200 flex items-center justify-center text-4xl">🍽️</div>
+            @endif
+        </div>
+        <div class="flex-1 p-4">
+            <div class="flex justify-between items-start mb-2">
+                <h3 class="font-bold">{{ $produit->nom }}</h3>
+                @if($produit->est_nouveau)
+                    <span class="bg-green-100 text-green-800 text-xs px-2 py-0.5 rounded">Nouveau</span>
+                @endif
+            </div>
+            <p class="text-sm text-gray-600 mb-2 line-clamp-2">{{ Str::limit($produit->description, 80) }}</p>
+            
+            <div class="flex items-center space-x-2 mb-2">
+                @if($produit->est_vegetarien) <span title="Végétarien">🥬</span> @endif
+                @if($produit->est_vegan) <span title="Vegan">🌱</span> @endif
+                @if($produit->est_halal) <span title="Halal">☪️</span> @endif
+                @if($produit->est_epice) <span title="Épicé">🌶️</span> @endif
+            </div>
+
+            <div class="flex justify-between items-center">
+                <div>
+                    @if($produit->est_en_promotion())
+                        <span class="font-bold text-orange-600">{{ number_format($produit->prix_promo, 0, ',', ' ') }} F</span>
+                        <span class="text-sm text-gray-400 line-through ml-1">{{ number_format($produit->prix_base, 0, ',', ' ') }} F</span>
+                    @else
+                        <span class="font-bold text-orange-600">{{ number_format($produit->prix_base, 0, ',', ' ') }} F</span>
+                    @endif
+                </div>
+                
+                <form action="{{ route('client.panier.ajouter') }}" method="POST">
+                    @csrf
+                    <input type="hidden" name="produit_id" value="{{ $produit->id }}">
+                    <input type="hidden" name="restaurant_id" value="{{ $restaurant->id }}">
+                    <input type="hidden" name="quantite" value="1">
+                    <button type="submit" class="bg-orange-600 text-white px-3 py-1 rounded-lg hover:bg-orange-700 text-sm">
+                        + Ajouter
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+```
+
+### 9.5 `resources/views/client/panier/show.blade.php`
+
+```blade
+@extends('layouts.app')
+@section('title', 'Mon panier')
+
+@section('content')
+    <div class="max-w-5xl mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold mb-6">🛒 Mon panier</h1>
+
+        @if($panier && $panier->lignes->count() > 0)
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {{-- Articles --}}
+                <div class="lg:col-span-2 space-y-4">
+                    @foreach($panier->lignes as $ligne)
+                        <div class="bg-white rounded-xl shadow-sm p-4 flex items-center">
+                            <img src="{{ $ligne->produit->imagePrincipale ? asset('storage/' . $ligne->produit->imagePrincipale->chemin_image) : 'https://via.placeholder.com/80' }}" 
+                                 class="w-20 h-20 rounded-lg object-cover mr-4">
+                            <div class="flex-1">
+                                <h3 class="font-bold">{{ $ligne->produit->nom }}</h3>
+                                @if($ligne->variante)
+                                    <p class="text-sm text-gray-600">Variante : {{ $ligne->variante->nom }}</p>
+                                @endif
+                                @if($ligne->notes)
+                                    <p class="text-sm text-orange-600">💬 {{ $ligne->notes }}</p>
+                                @endif
+                                <p class="text-sm text-gray-500">{{ number_format($ligne->prix_unitaire, 0, ',', ' ') }} F / unité</p>
+                            </div>
+                            <div class="flex items-center space-x-3">
+                                <form action="{{ route('client.panier.modifier', $ligne) }}" method="POST" class="flex items-center space-x-2">
+                                    @csrf @method('PATCH')
+                                    <button type="submit" name="quantite" value="{{ max(1, $ligne->quantite - 1) }}" class="w-8 h-8 bg-gray-200 rounded-full hover:bg-gray-300">-</button>
+                                    <span class="font-bold w-8 text-center">{{ $ligne->quantite }}</span>
+                                    <button type="submit" name="quantite" value="{{ $ligne->quantite + 1 }}" class="w-8 h-8 bg-gray-200 rounded-full hover:bg-gray-300">+</button>
+                                </form>
+                                <span class="font-bold text-orange-600 w-20 text-right">
+                                    {{ number_format($ligne->prix_unitaire * $ligne->quantite, 0, ',', ' ') }} F
+                                </span>
+                                <form action="{{ route('client.panier.supprimer', $ligne) }}" method="POST">
+                                    @csrf @method('DELETE')
+                                    <button type="submit" class="text-red-600 hover:text-red-800">🗑️</button>
+                                </form>
+                            </div>
+                        </div>
+                    @endforeach
+
+                    {{-- Notes --}}
+                    <div class="bg-white rounded-xl shadow-sm p-4">
+                        <label class="block text-sm font-medium mb-2">💬 Notes pour le restaurant</label>
+                        <textarea class="w-full px-4 py-2 border rounded-lg" rows="2" placeholder="Ex: Sans oignons, bien cuit..."></textarea>
+                    </div>
+                </div>
+
+                {{-- Résumé --}}
+                <div class="lg:col-span-1">
+                    <div class="bg-white rounded-xl shadow-sm p-6 sticky top-24">
+                        <h3 class="font-bold text-lg mb-4">Récapitulatif</h3>
+                        
+                        <div class="space-y-2 mb-4">
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Sous-total</span>
+                                <span>{{ number_format($panier->sous_total, 0, ',', ' ') }} F</span>
+                            </div>
+                            @if($panier->codePromo)
+                                <div class="flex justify-between text-green-600">
+                                    <span>Code promo ({{ $panier->codePromo->code }})</span>
+                                    <span>-{{ number_format($panier->codePromo->calculerReduction($panier->sous_total), 0, ',', ' ') }} F</span>
+                                </div>
+                            @endif
+                            <div class="flex justify-between font-bold text-lg border-t pt-2">
+                                <span>Total</span>
+                                <span class="text-orange-600">{{ number_format($panier->montant_total, 0, ',', ' ') }} F</span>
+                            </div>
+                        </div>
+
+                        {{-- Code promo --}}
+                        <form action="{{ route('client.panier.code-promo') }}" method="POST" class="mb-4">
+                            @csrf
+                            <div class="flex space-x-2">
+                                <input type="text" name="code" placeholder="Code promo" class="flex-1 px-3 py-2 border rounded-lg">
+                                <button type="submit" class="bg-gray-200 px-4 rounded-lg hover:bg-gray-300">Appliquer</button>
+                            </div>
+                        </form>
+
+                        <a href="#" class="block w-full bg-orange-600 text-white text-center py-3 rounded-lg font-bold hover:bg-orange-700">
+                            Passer la commande →
+                        </a>
+                    </div>
+                </div>
+            </div>
+        @else
+            <x-empty-state icon="🛒" title="Votre panier est vide" description="Explorez nos restaurants et ajoutez vos plats préférés"
+                :action="'<a href=\"' . route('client.restaurants.index') . '\" class=\"bg-orange-600 text-white px-6 py-3 rounded-lg inline-block\">Voir les restaurants</a>'" />
+        @endif
+    </div>
+@endsection
+```
+
+### 9.6 `resources/views/client/commandes/suivi.blade.php` (Suivi temps réel)
+
+```blade
+@extends('layouts.app')
+@section('title', 'Suivi commande #' . $commande->numero)
+
+@section('content')
+    <div class="max-w-5xl mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold mb-6">📍 Suivi de la commande #{{ $commande->numero }}</h1>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {{-- Progression --}}
+            <div class="lg:col-span-2 space-y-6">
+                <div class="bg-white rounded-xl shadow-sm p-6">
+                    <h3 class="font-bold text-lg mb-4">Statut actuel</h3>
+                    <div class="flex items-center justify-between mb-6">
+                        @php
+                            $etapes = ['en_attente', 'confirmee', 'en_preparation', 'prete', 'en_livraison', 'livree'];
+                            $labels = ['Reçue', 'Confirmée', 'En préparation', 'Prête', 'En livraison', 'Livrée'];
+                            $icons = ['📥', '✅', '🍳', '📦', '🛵', '🏁'];
+                            $indexActuel = array_search($commande->statut->value, $etapes);
+                        @endphp
+                        @foreach($etapes as $i => $etape)
+                            <div class="flex-1 text-center {{ $i <= $indexActuel ? 'text-green-600' : 'text-gray-300' }}">
+                                <div class="text-3xl mb-1">{{ $icons[$i] }}</div>
+                                <p class="text-xs">{{ $labels[$i] }}</p>
+                            </div>
+                        @endforeach
+                    </div>
+                    <div class="bg-orange-50 border-l-4 border-orange-500 p-4 rounded">
+                        <p class="font-semibold">{{ $labels[$indexActuel] }}</p>
+                        <p class="text-sm text-gray-600">Temps estimé : {{ $commande->temps_preparation_estime }} minutes</p>
+                    </div>
+                </div>
+
+                {{-- Carte tracking --}}
+                @if($commande->livraison)
+                    <div class="bg-white rounded-xl shadow-sm p-6">
+                        <h3 class="font-bold text-lg mb-4">🗺️ Position du livreur</h3>
+                        <div id="map" style="height: 400px;" class="rounded-lg"></div>
+                    </div>
+                @endif
+            </div>
+
+            {{-- Détails --}}
+            <div class="space-y-6">
+                <div class="bg-white rounded-xl shadow-sm p-6">
+                    <h3 class="font-bold text-lg mb-3">🏪 Restaurant</h3>
+                    <p class="font-semibold">{{ $commande->restaurant->nom }}</p>
+                    <p class="text-sm text-gray-600">{{ $commande->restaurant->adresse }}</p>
+                </div>
+
+                @if($commande->livraison && $commande->livraison->livreur)
+                    <div class="bg-white rounded-xl shadow-sm p-6">
+                        <h3 class="font-bold text-lg mb-3">🛵 Livreur</h3>
+                        <div class="flex items-center mb-3">
+                            <img src="{{ $commande->livraison->livreur->utilisateur->avatar_url }}" class="w-12 h-12 rounded-full mr-3">
+                            <div>
+                                <p class="font-semibold">{{ $commande->livraison->livreur->utilisateur->nom_complet }}</p>
+                                <p class="text-sm text-yellow-600">⭐ {{ number_format($commande->livraison->livreur->note, 1) }}</p>
+                            </div>
+                        </div>
+                        <a href="tel:{{ $commande->livraison->livreur->utilisateur->telephone }}" 
+                           class="block text-center bg-gray-100 py-2 rounded-lg hover:bg-gray-200">
+                            📞 Appeler le livreur
+                        </a>
+                    </div>
+                @endif
+
+                <div class="bg-white rounded-xl shadow-sm p-6">
+                    <h3 class="font-bold text-lg mb-3">📋 Récapitulatif</h3>
+                    <ul class="space-y-2">
+                        @foreach($commande->lignes as $ligne)
+                            <li class="flex justify-between text-sm">
+                                <span>{{ $ligne->quantite }}x {{ $ligne->produit->nom }}</span>
+                                <span>{{ number_format($ligne->prix_total_ligne, 0, ',', ' ') }} F</span>
+                            </li>
+                        @endforeach
+                    </ul>
+                    <div class="border-t mt-3 pt-3 flex justify-between font-bold">
+                        <span>Total</span>
+                        <span class="text-orange-600">{{ number_format($commande->montant_total, 0, ',', ' ') }} F</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+@endsection
+
+@push('scripts')
+<script>
+    @if($commande->livraison)
+    const map = L.map('map').setView([{{ $commande->restaurant->latitude }}, {{ $commande->restaurant->longitude }}], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    
+    const restaurantMarker = L.marker([{{ $commande->restaurant->latitude }}, {{ $commande->restaurant->longitude }}])
+        .addTo(map).bindPopup('🏪 Restaurant');
+    
+    const clientMarker = L.marker([{{ $commande->adresseLivraison->latitude }}, {{ $commande->adresseLivraison->longitude }}])
+        .addTo(map).bindPopup('👤 Vous');
+    
+    const livreurMarker = L.marker([{{ $commande->restaurant->latitude }}, {{ $commande->restaurant->longitude }}], {
+        icon: L.divIcon({ html: '🛵', className: 'livreur-icon', iconSize: [30, 30] })
+    }).addTo(map).bindPopup('🛵 Livreur');
+
+    // Écouter les mises à jour de position en temps réel
+    window.Echo.private(`livraison.{{ $commande->livraison->id }}`)
+        .listen('.livreur.position', (e) => {
+            livreurMarker.setLatLng([e.lat, e.lng]);
+            map.panTo([e.lat, e.lng]);
+        });
+    @endif
+</script>
+@endpush
+```
+
+---
+
+## 📧 10. TEMPLATES EMAIL
+
+### 10.1 `resources/views/emails/client/confirmation-commande.blade.php`
+
+```blade
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Confirmation de commande</title>
+</head>
+<body style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
+    <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 10px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #f97316, #dc2626); color: white; padding: 30px; text-align: center;">
+            <h1 style="margin: 0;">🍽️ Commande confirmée !</h1>
+        </div>
+
+        <div style="padding: 30px;">
+            <p>Bonjour {{ $commande->client->utilisateur->prenom }},</p>
+            <p>Nous avons bien reçu votre commande <strong>#{{ $commande->numero }}</strong>.</p>
+
+            <div style="background: #f9f9f9; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <h3 style="margin-top: 0;">🏪 {{ $commande->restaurant->nom }}</h3>
+                <ul style="list-style: none; padding: 0;">
+                    @foreach($commande->lignes as $ligne)
+                        <li style="padding: 5px 0; border-bottom: 1px solid #eee;">
+                            {{ $ligne->quantite }}x {{ $ligne->produit->nom }} - {{ number_format($ligne->prix_total_ligne, 0, ',', ' ') }} F
+                        </li>
+                    @endforeach
+                </ul>
+                <p style="text-align: right; font-size: 18px; font-weight: bold; color: #f97316; margin-bottom: 0;">
+                    Total : {{ number_format($commande->montant_total, 0, ',', ' ') }} FCFA
+                </p>
+            </div>
+
+            <p>Nous vous tiendrons informé de l'avancement de votre commande.</p>
+
+            <a href="{{ url('/client/commandes/' . $commande->id) }}" 
+               style="display: inline-block; background: #f97316; color: white; padding: 12px 30px; text-decoration: none; border-radius: 8px; font-weight: bold;">
+                Suivre ma commande
+            </a>
+        </div>
+
+        <div style="background: #f5f5f5; padding: 20px; text-align: center; font-size: 12px; color: #666;">
+            <p>© {{ date('Y') }} RestoApp - Tous droits réservés</p>
+        </div>
+    </div>
+</body>
+</html>
+```
+
+---
+
+## 🎛️ 11. COMPOSANTS LIVEWIRE
+
+### 11.1 `app/Livewire/Shared/NotificationsDropdown.php`
+
+```php
+<?php
+
+namespace App\Livewire\Shared;
+
+use Livewire\Component;
+use App\Models\Notification;
+
+class NotificationsDropdown extends Component
+{
+    public $notifications;
+    public $nonLuesCount = 0;
+
+    public function mount()
+    {
+        $this->chargerNotifications();
+    }
+
+    public function chargerNotifications()
+    {
+        $userId = auth()->id();
+        $this->notifications = Notification::utilisateur($userId)
+            ->latest('cree_le')
+            ->take(10)
+            ->get();
+        $this->nonLuesCount = Notification::utilisateur($userId)->nonLues()->count();
+    }
+
+    public function marquerLue($id)
+    {
+        Notification::find($id)?->marquerCommeLue();
+        $this->chargerNotifications();
+    }
+
+    public function toutMarquerLues()
+    {
+        Notification::marquerToutesCommeLues(auth()->id());
+        $this->chargerNotifications();
+    }
+
+    public function render()
+    {
+        return view('livewire.shared.notifications-dropdown');
+    }
+}
+```
+
+### 11.2 `resources/views/livewire/shared/notifications-dropdown.blade.php`
+
+```blade
+<div x-data="{ open: false }" class="relative">
+    <button @click="open = !open" class="relative p-2 text-gray-600 hover:text-orange-600">
+        🔔
+        @if($nonLuesCount > 0)
+            <span class="absolute top-0 right-0 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                {{ $nonLuesCount }}
+            </span>
+        @endif
+    </button>
+
+    <div x-show="open" @click.away="open = false" 
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0 transform scale-95"
+         x-transition:enter-end="opacity-100 transform scale-100"
+         class="absolute right-0 mt-2 w-96 bg-white rounded-xl shadow-lg overflow-hidden z-50">
+        
+        <div class="p-4 border-b flex justify-between items-center bg-gray-50">
+            <h3 class="font-bold">Notifications</h3>
+            @if($nonLuesCount > 0)
+                <button wire:click="toutMarquerLues" class="text-sm text-orange-600 hover:underline">
+                    Tout marquer comme lu
+                </button>
+            @endif
+        </div>
+
+        <div class="max-h-96 overflow-y-auto">
+            @forelse($notifications as $notification)
+                <div class="p-4 border-b hover:bg-gray-50 {{ $notification->est_lue ? '' : 'bg-orange-50' }}"
+                     wire:click="marquerLue('{{ $notification->id }}')">
+                    <p class="font-semibold text-sm">{{ $notification->getTranslation('titre') }}</p>
+                    <p class="text-sm text-gray-600">{{ $notification->getTranslation('message') }}</p>
+                    <p class="text-xs text-gray-400 mt-1">{{ $notification->cree_le->diffForHumans() }}</p>
+                </div>
+            @empty
+                <div class="p-8 text-center text-gray-500">
+                    <p class="text-4xl mb-2">🔕</p>
+                    <p>Aucune notification</p>
+                </div>
+            @endforelse
+        </div>
+    </div>
+</div>
+```
+
+---
+
