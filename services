@@ -1,0 +1,2032 @@
+# 🎯 SERVICES MÉTIER COMPLETS - LARAVEL RESTAURANT
+
+Voici tous les services métier pour ton application, organisés par domaine.
+
+---
+
+## 📁 1. STRUCTURE DES DOSSIERS
+
+```
+app/
+├── Services/
+│   ├── OrderService.php
+│   ├── PaymentService.php
+│   ├── DeliveryService.php
+│   ├── ReservationService.php
+│   ├── LoyaltyService.php
+│   ├── NotificationService.php
+│   ├── PricingService.php
+│   ├── ImageService.php
+│   ├── SearchService.php
+│   └── AnalyticsService.php
+├── Exceptions/
+│   ├── StockInsuffisantException.php
+│   ├── PanierVideException.php
+│   ├── CodePromoInvalideException.php
+│   ├── PaiementEchoueException.php
+│   ├── LivraisonNonAssigneeException.php
+│   └── ReservationIndisponibleException.php
+```
+
+---
+
+## 🛒 2. ORDER SERVICE
+
+### 2.1 `app/Services/OrderService.php`
+
+```php
+<?php
+
+namespace App\Services;
+
+use App\Models\Commande;
+use App\Models\Panier;
+use App\Models\ProfilClient;
+use App\Models\CodePromo;
+use App\Models\Livraison;
+use App\Enums\StatutCommande;
+use App\Enums\TypeCommande;
+use App\Exceptions\StockInsuffisantException;
+use App\Exceptions\PanierVideException;
+use App\Exceptions\CodePromoInvalideException;
+use App\Exceptions\RestaurantFermeeException;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+
+class OrderService
+{
+    public function __construct(
+        private PaymentService $paymentService,
+        private LoyaltyService $loyaltyService,
+        private NotificationService $notificationService,
+        private PricingService $pricingService,
+        private DeliveryService $deliveryService
+    ) {}
+
+    /**
+     * Crée une commande complète depuis un panier
+     */
+    public function creerDepuisPanier(ProfilClient $client, Panier $panier, array $donnees): Commande
+    {
+        return DB::transaction(function () use ($client, $panier, $donnees) {
+            
+            // 1. VALIDATIONS
+            $this->validerPanier($panier);
+            $this->verifierDisponibiliteRestaurant($panier->restaurant_id);
+            $this->verifierStockProduits($panier);
+            $this->verifierMontantMinimum($panier);
+            $this->verifierAdresseLivraison($donnees);
+
+            // 2. CALCUL DES TOTAUX
+            $totaux = $this->pricingService->calculerTotauxCommande($panier, $donnees);
+
+            // 3. CRÉATION DE LA COMMANDE
+            $commande = Commande::create([
+                'client_id' => $client->id,
+                'restaurant_id' => $panier->restaurant_id,
+                'type_commande' => $donnees['type_commande'],
+                'adresse_livraison_id' => $donnees['adresse_livraison_id'] ?? null,
+                'table_id' => $donnees['table_id'] ?? null,
+                'statut' => StatutCommande::EN_ATTENTE,
+                'sous_total' => $totaux['sous_total'],
+                'montant_tva' => $totaux['tva'],
+                'frais_livraison' => $totaux['frais_livraison'],
+                'montant_reduction' => $totaux['reduction'],
+                'montant_total' => $totaux['total'],
+                'notes_client' => $donnees['notes_client'] ?? null,
+                'code_promo_id' => $totaux['code_promo_id'] ?? null,
+                'temps_preparation_estime' => $this->estimerTempsPreparation($panier),
+            ]);
+
+            // 4. TRANSFERT DES LIGNES
+            $this->transfererLignesPanier($panier, $commande);
+
+            // 5. GESTION DU PAIEMENT
+            $paiement = $this->paymentService->initierPaiement($commande, $donnees);
+
+            // 6. CRÉER LIVRAISON SI NÉCESSAIRE
+            if ($commande->type_commande === TypeCommande::LIVRAISON) {
+                $this->creerLivraison($commande, $totaux['frais_livraison']);
+            }
+
+            // 7. DÉCRÉMENTER LE STOCK
+            $this->decrementerStock($commande);
+
+            // 8. ENREGISTRER UTILISATION CODE PROMO
+            if ($totaux['code_promo_id']) {
+                $this->enregistrerUtilisationCodePromo($commande, $totaux['reduction']);
+            }
+
+            // 9. VIDER LE PANIER
+            $panier->lignes()->delete();
+            $panier->delete();
+
+            // 10. NOTIFICATIONS
+            $this->notifierCreationCommande($commande);
+
+            Log::info("Commande créée: {$commande->numero}", [
+                'client_id' => $client->id,
+                'montant' => $commande->montant_total,
+            ]);
+
+            return $commande->load(['lignes.produit', 'paiement', 'livraison']);
+        });
+    }
+
+    /**
+     * Change le statut d'une commande
+     */
+    public function changerStatut(Commande $commande, StatutCommande $nouveauStatut, ?string $commentaire = null, $modifiePar = null): void
+    {
+        DB::transaction(function () use ($commande, $nouveauStatut, $commentaire, $modifiePar) {
+            
+            // Valider la transition
+            $this->validerTransitionStatut($commande, $nouveauStatut);
+
+            $ancienStatut = $commande->statut;
+            $commande->update(['statut' => $nouveauStatut]);
+
+            // Historique
+            $commande->historiqueStatuts()->create([
+                'statut' => $nouveauStatut->value,
+                'commentaire' => $commentaire,
+                'modifie_par_id' => $modifiePar?->id,
+            ]);
+
+            // Actions spécifiques selon le statut
+            $this->executerActionsPostStatut($commande, $ancienStatut, $nouveauStatut);
+
+            // Notifications
+            $this->notificationService->notifierChangementStatutCommande($commande, $ancienStatut, $nouveauStatut);
+        });
+    }
+
+    /**
+     * Annule une commande
+     */
+    public function annuler(Commande $commande, string $raison, $annulePar = null): void
+    {
+        if (!$commande->estAnnulable()) {
+            throw new \Exception('Cette commande ne peut plus être annulée');
+        }
+
+        DB::transaction(function () use ($commande, $raison, $annulePar) {
+            
+            // Rembourser si payé
+            if ($commande->paiement && $commande->paiement->estReussi()) {
+                $this->paymentService->rembourser($commande->paiement, $raison);
+            }
+
+            // Remettre le stock
+            $this->remettreStock($commande);
+
+            // Annuler la livraison si existe
+            if ($commande->livraison) {
+                $commande->livraison->update(['statut' => 'echouee']);
+            }
+
+            // Changer le statut
+            $commande->changerStatut(StatutCommande::ANNULEE, $raison, $annulePar);
+
+            // Notifier
+            $this->notificationService->notifierAnnulationCommande($commande, $raison);
+
+            Log::info("Commande annulée: {$commande->numero}", ['raison' => $raison]);
+        });
+    }
+
+    /**
+     * Termine une commande (après livraison)
+     */
+    public function terminer(Commande $commande): void
+    {
+        DB::transaction(function () use ($commande) {
+            $commande->changerStatut(StatutCommande::TERMINEE);
+
+            // Attribuer les points de fidélité
+            $pointsGagnes = (int) floor($commande->montant_total / 100);
+            $this->loyaltyService->attribuerPoints(
+                $commande->client,
+                $pointsGagnes,
+                "Points gagnés sur la commande #{$commande->numero}",
+                $commande
+            );
+
+            // Mettre à jour les stats client
+            $commande->client->increment('nombre_commandes');
+            $commande->client->increment('total_depense', $commande->montant_total);
+            $commande->client->update(['derniere_commande_le' => now()]);
+
+            // Demander un avis
+            $this->notificationService->demanderAvisClient($commande);
+        });
+    }
+
+    // ===== MÉTHODES PRIVÉES =====
+
+    private function validerPanier(Panier $panier): void
+    {
+        if ($panier->lignes->isEmpty()) {
+            throw new PanierVideException('Votre panier est vide');
+        }
+    }
+
+    private function verifierDisponibiliteRestaurant(string $restaurantId): void
+    {
+        $restaurant = \App\Models\Restaurant::find($restaurantId);
+
+        if (!$restaurant) {
+            throw new \Exception('Restaurant introuvable');
+        }
+
+        if (!$restaurant->estOuvertMaintenant()) {
+            throw new RestaurantFermeeException('Ce restaurant est actuellement fermé');
+        }
+
+        if ($restaurant->statut !== 'actif') {
+            throw new \Exception('Ce restaurant n\'est pas disponible');
+        }
+    }
+
+    private function verifierStockProduits(Panier $panier): void
+    {
+        foreach ($panier->lignes as $ligne) {
+            $produit = $ligne->produit;
+            
+            if (!$produit->est_disponible) {
+                throw new \Exception("Le produit '{$produit->getTranslation('nom')}' n'est plus disponible");
+            }
+            
+            if ($produit->quantite_stock !== null && $produit->quantite_stock < $ligne->quantite) {
+                throw new StockInsuffisantException(
+                    "Stock insuffisant pour '{$produit->getTranslation('nom')}'. Disponible : {$produit->quantite_stock}"
+                );
+            }
+        }
+    }
+
+    private function verifierMontantMinimum(Panier $panier): void
+    {
+        $restaurant = $panier->restaurant;
+        
+        if ($panier->sous_total < $restaurant->montant_minimum_commande) {
+            throw new \Exception(
+                "Le montant minimum de commande est de {$restaurant->montant_minimum_commande} FCFA"
+            );
+        }
+    }
+
+    private function verifierAdresseLivraison(array $donnees): void
+    {
+        if ($donnees['type_commande'] === 'livraison' && empty($donnees['adresse_livraison_id'])) {
+            throw new \Exception('Adresse de livraison requise');
+        }
+
+        if (!empty($donnees['adresse_livraison_id'])) {
+            $adresse = \App\Models\Adresse::find($donnees['adresse_livraison_id']);
+            if (!$adresse) {
+                throw new \Exception('Adresse de livraison introuvable');
+            }
+        }
+    }
+
+    private function transfererLignesPanier(Panier $panier, Commande $commande): void
+    {
+        foreach ($panier->lignes as $ligne) {
+            $commandeLigne = $commande->lignes()->create([
+                'produit_id' => $ligne->produit_id,
+                'variante_id' => $ligne->variante_id,
+                'nom_produit' => $ligne->produit->getTranslations('nom'),
+                'quantite' => $ligne->quantite,
+                'prix_unitaire' => $ligne->prix_unitaire,
+                'modificateur_prix' => $ligne->variante?->modificateur_prix ?? 0,
+                'notes' => $ligne->notes,
+            ]);
+
+            // Transférer les options (suppléments)
+            if ($ligne->options) {
+                foreach ($ligne->options as $option) {
+                    $commandeLigne->options()->create([
+                        'supplement_id' => $option['id'] ?? null,
+                        'nom_supplement' => json_encode(['fr' => $option['nom'] ?? '']),
+                        'prix' => $option['prix'] ?? 0,
+                    ]);
+                }
+            }
+        }
+    }
+
+    private function creerLivraison(Commande $commande, float $fraisLivraison): void
+    {
+        Livraison::create([
+            'commande_id' => $commande->id,
+            'statut' => 'en_attente_livreur',
+            'commission_livreur' => $fraisLivraison * 0.7, // 70% pour le livreur
+        ]);
+    }
+
+    private function decrementerStock(Commande $commande): void
+    {
+        foreach ($commande->lignes as $ligne) {
+            $produit = $ligne->produit;
+            if ($produit->quantite_stock !== null) {
+                $produit->decrement('quantite_stock', $ligne->quantite);
+            }
+        }
+    }
+
+    private function remettreStock(Commande $commande): void
+    {
+        foreach ($commande->lignes as $ligne) {
+            $produit = $ligne->produit;
+            if ($produit->quantite_stock !== null) {
+                $produit->increment('quantite_stock', $ligne->quantite);
+            }
+        }
+    }
+
+    private function enregistrerUtilisationCodePromo(Commande $commande, float $reduction): void
+    {
+        \App\Models\UtilisationCodePromo::create([
+            'code_promo_id' => $commande->code_promo_id,
+            'commande_id' => $commande->id,
+            'client_id' => $commande->client_id,
+            'montant_reduction' => $reduction,
+        ]);
+    }
+
+    private function estimerTempsPreparation(Panier $panier): int
+    {
+        $tempsMax = $panier->lignes->max(fn($l) => $l->produit->temps_preparation ?? 15);
+        return $tempsMax + 10; // 10 min de marge
+    }
+
+    private function notifierCreationCommande(Commande $commande): void
+    {
+        // Notifier le restaurant
+        $this->notificationService->notifierRestaurantNouvelleCommande($commande);
+        
+        // Notifier le client
+        $this->notificationService->confirmerCommandeClient($commande);
+    }
+
+    private function executerActionsPostStatut(Commande $commande, $ancienStatut, $nouveauStatut): void
+    {
+        match($nouveauStatut) {
+            StatutCommande::CONFIRMEE => $this->onCommandeConfirmee($commande),
+            StatutCommande::PRETE => $this->onCommandePrete($commande),
+            StatutCommande::LIVREE => $this->onCommandeLivree($commande),
+            StatutCommande::TERMINEE => $this->terminer($commande),
+            default => null,
+        };
+    }
+
+    private function onCommandeConfirmee(Commande $commande): void
+    {
+        // Si livraison, déclencher assignation livreur
+        if ($commande->type_commande === TypeCommande::LIVRAISON && $commande->livraison) {
+            $this->deliveryService->declencherAssignationLivreur($commande->livraison);
+        }
+    }
+
+    private function onCommandePrete(Commande $commande): void
+    {
+        // Notifier le client que sa commande est prête
+        $this->notificationService->notifierCommandePrete($commande);
+    }
+
+    private function onCommandeLivree(Commande $commande): void
+    {
+        $commande->update(['heure_livraison_effective' => now()]);
+    }
+
+    public function validerTransitionStatut(Commande $commande, StatutCommande $nouveauStatut): void
+    {
+        $transitionsAutorisees = [
+            StatutCommande::EN_ATTENTE->value => ['confirmee', 'annulee'],
+            StatutCommande::CONFIRMEE->value => ['en_preparation', 'annulee'],
+            StatutCommande::EN_PREPARATION->value => ['prete'],
+            StatutCommande::PRETE->value => ['en_livraison'],
+            StatutCommande::EN_LIVRAISON->value => ['livree'],
+            StatutCommande::LIVREE->value => ['terminee'],
+        ];
+
+        $statutActuel = $commande->statut->value;
+        $transitionsPossibles = $transitionsAutorisees[$statutActuel] ?? [];
+
+        if (!in_array($nouveauStatut->value, $transitionsPossibles)) {
+            throw new \Exception(
+                "Transition impossible de '{$statutActuel}' vers '{$nouveauStatut->value}'"
+            );
+        }
+    }
+}
+```
+
+---
+
+## 💳 3. PAYMENT SERVICE
+
+### 3.1 `app/Services/PaymentService.php`
+
+```php
+<?php
+
+namespace App\Services;
+
+use App\Models\Commande;
+use App\Models\Paiement;
+use App\Models\TransactionPaiement;
+use App\Models\Remboursement;
+use App\Enums\MethodePaiement;
+use App\Exceptions\PaiementEchoueException;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
+
+class PaymentService
+{
+    /**
+     * Initie le paiement selon la méthode choisie
+     */
+    public function initierPaiement(Commande $commande, array $donnees): Paiement
+    {
+        $methode = MethodePaiement::from($donnees['methode_paiement']);
+
+        try {
+            return match($methode) {
+                MethodePaiement::CARTE_BANCAIRE => $this->payerParCarte($commande),
+                MethodePaiement::MTN_MOBILE_MONEY => $this->payerParMtn($commande, $donnees['telephone_mobile_money']),
+                MethodePaiement::MOOV_MONEY => $this->payerParMoov($commande, $donnees['telephone_mobile_money']),
+                MethodePaiement::ORANGE_MONEY => $this->payerParOrange($commande, $donnees['telephone_mobile_money']),
+                MethodePaiement::WAVE => $this->payerParWave($commande, $donnees['telephone_mobile_money']),
+                MethodePaiement::PAYPAL => $this->payerParPaypal($commande),
+                MethodePaiement::PAYEER => $this->payerParPayeer($commande),
+                MethodePaiement::PAYONEER => $this->payerParPayoneer($commande),
+                MethodePaiement::PORTEFEUILLE => $this->payerParPortefeuille($commande),
+                MethodePaiement::CARTE_CADEAU => $this->payerParCarteCadeau($commande, $donnees['code_carte_cadeau']),
+                MethodePaiement::ESPECES_LIVRAISON => $this->payerEspeces($commande),
+                default => throw new \Exception('Méthode de paiement non supportée'),
+            };
+        } catch (\Exception $e) {
+            Log::error('Erreur paiement', [
+                'commande_id' => $commande->id,
+                'methode' => $methode->value,
+                'error' => $e->getMessage(),
+            ]);
+            throw new PaiementEchoueException('Erreur lors du paiement: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Paiement par carte bancaire via Stripe
+     */
+    private function payerParCarte(Commande $commande): Paiement
+    {
+        $paiement = Paiement::create([
+            'commande_id' => $commande->id,
+            'client_id' => $commande->client_id,
+            'reference_transaction' => 'PAY-' . strtoupper(Str::random(16)),
+            'methode_paiement' => MethodePaiement::CARTE_BANCAIRE,
+            'prestataire' => 'stripe',
+            'montant' => $commande->montant_total,
+            'devise' => $commande->restaurant->devise ?? 'XOF',
+            'statut' => 'en_attente',
+        ]);
+
+        // Créer un PaymentIntent Stripe
+        $intent = \Stripe\PaymentIntent::create([
+            'amount' => (int) ($commande->montant_total * 100),
+            'currency' => strtolower($commande->restaurant->devise ?? 'xof'),
+            'metadata' => [
+                'commande_id' => $commande->id,
+                'commande_numero' => $commande->numero,
+                'paiement_id' => $paiement->id,
+                'client_id' => $commande->client_id,
+            ],
+            'description' => "Commande #{$commande->numero}",
+        ]);
+
+        $paiement->update([
+            'reference_prestataire' => $intent->id,
+            'metadata' => ['client_secret' => $intent->client_secret],
+        ]);
+
+        // Logger la transaction
+        $this->loggerTransaction($paiement, 'autorisation', $commande->montant_total, 'en_attente', [
+            'stripe_intent_id' => $intent->id,
+        ]);
+
+        return $paiement;
+    }
+
+    /**
+     * Paiement MTN Mobile Money
+     */
+    private function payerParMtn(Commande $commande, string $telephone): Paiement
+    {
+        $paiement = Paiement::create([
+            'commande_id' => $commande->id,
+            'client_id' => $commande->client_id,
+            'reference_transaction' => 'PAY-MTN-' . strtoupper(Str::random(12)),
+            'methode_paiement' => MethodePaiement::MTN_MOBILE_MONEY,
+            'prestataire' => 'mtn',
+            'montant' => $commande->montant_total,
+            'devise' => 'XOF',
+            'telephone_mobile_money' => $telephone,
+            'statut' => 'en_attente',
+        ]);
+
+        // Appel API MTN MoMo
+        $response = $this->appelerApiMtn($paiement, $telephone);
+
+        $paiement->update([
+            'reference_prestataire' => $response['transaction_id'],
+        ]);
+
+        $this->loggerTransaction($paiement, 'autorisation', $commande->montant_total, 'en_attente', $response);
+
+        return $paiement;
+    }
+
+    /**
+     * Paiement Moov Money
+     */
+    private function payerParMoov(Commande $commande, string $telephone): Paiement
+    {
+        $paiement = Paiement::create([
+            'commande_id' => $commande->id,
+            'client_id' => $commande->client_id,
+            'reference_transaction' => 'PAY-MOOV-' . strtoupper(Str::random(12)),
+            'methode_paiement' => MethodePaiement::MOOV_MONEY,
+            'prestataire' => 'moov',
+            'montant' => $commande->montant_total,
+            'devise' => 'XOF',
+            'telephone_mobile_money' => $telephone,
+            'statut' => 'en_attente',
+        ]);
+
+        $response = $this->appelerApiMoov($paiement, $telephone);
+
+        $paiement->update(['reference_prestataire' => $response['transaction_id']]);
+
+        return $paiement;
+    }
+
+    /**
+     * Paiement Orange Money
+     */
+    private function payerParOrange(Commande $commande, string $telephone): Paiement
+    {
+        $paiement = Paiement::create([
+            'commande_id' => $commande->id,
+            'client_id' => $commande->client_id,
+            'reference_transaction' => 'PAY-OM-' . strtoupper(Str::random(12)),
+            'methode_paiement' => MethodePaiement::ORANGE_MONEY,
+            'prestataire' => 'orange_money',
+            'montant' => $commande->montant_total,
+            'devise' => 'XOF',
+            'telephone_mobile_money' => $telephone,
+            'statut' => 'en_attente',
+        ]);
+
+        $response = $this->appelerApiOrangeMoney($paiement, $telephone);
+
+        $paiement->update(['reference_prestataire' => $response['transaction_id']]);
+
+        return $paiement;
+    }
+
+    /**
+     * Paiement Wave
+     */
+    private function payerParWave(Commande $commande, string $telephone): Paiement
+    {
+        $paiement = Paiement::create([
+            'commande_id' => $commande->id,
+            'client_id' => $commande->client_id,
+            'reference_transaction' => 'PAY-WAVE-' . strtoupper(Str::random(12)),
+            'methode_paiement' => MethodePaiement::WAVE,
+            'prestataire' => 'wave',
+            'montant' => $commande->montant_total,
+            'devise' => 'XOF',
+            'telephone_mobile_money' => $telephone,
+            'statut' => 'en_attente',
+        ]);
+
+        $response = $this->appelerApiWave($paiement, $telephone);
+
+        $paiement->update(['reference_prestataire' => $response['transaction_id']]);
+
+        return $paiement;
+    }
+
+    /**
+     * Paiement PayPal
+     */
+    private function payerParPaypal(Commande $commande): Paiement
+    {
+        $paiement = Paiement::create([
+            'commande_id' => $commande->id,
+            'client_id' => $commande->client_id,
+            'reference_transaction' => 'PAY-PAYPAL-' . strtoupper(Str::random(12)),
+            'methode_paiement' => MethodePaiement::PAYPAL,
+            'prestataire' => 'paypal',
+            'montant' => $commande->montant_total,
+            'devise' => 'USD',
+            'statut' => 'en_attente',
+        ]);
+
+        $response = $this->appelerApiPaypal($paiement);
+
+        $paiement->update(['reference_prestataire' => $response['order_id']]);
+
+        return $paiement;
+    }
+
+    /**
+     * Paiement Payeer
+     */
+    private function payerParPayeer(Commande $commande): Paiement
+    {
+        $paiement = Paiement::create([
+            'commande_id' => $commande->id,
+            'client_id' => $commande->client_id,
+            'reference_transaction' => 'PAY-PAYEER-' . strtoupper(Str::random(12)),
+            'methode_paiement' => MethodePaiement::PAYEER,
+            'prestataire' => 'payeer',
+            'montant' => $commande->montant_total,
+            'devise' => 'USD',
+            'statut' => 'en_attente',
+        ]);
+
+        return $paiement;
+    }
+
+    /**
+     * Paiement Payoneer
+     */
+    private function payerParPayoneer(Commande $commande): Paiement
+    {
+        $paiement = Paiement::create([
+            'commande_id' => $commande->id,
+            'client_id' => $commande->client_id,
+            'reference_transaction' => 'PAY-PAYONEER-' . strtoupper(Str::random(12)),
+            'methode_paiement' => MethodePaiement::PAYONEER,
+            'prestataire' => 'payoneer',
+            'montant' => $commande->montant_total,
+            'devise' => 'USD',
+            'statut' => 'en_attente',
+        ]);
+
+        return $paiement;
+    }
+
+    /**
+     * Paiement par portefeuille client
+     */
+    private function payerParPortefeuille(Commande $commande): Paiement
+    {
+        $portefeuille = $commande->client->portefeuille;
+
+        if (!$portefeuille || $portefeuille->solde < $commande->montant_total) {
+            throw new \Exception('Solde portefeuille insuffisant');
+        }
+
+        // Débiter le portefeuille
+        $portefeuille->debiter($commande->montant_total, "Paiement commande #{$commande->numero}");
+
+        // Créer le paiement
+        $paiement = Paiement::create([
+            'commande_id' => $commande->id,
+            'client_id' => $commande->client_id,
+            'reference_transaction' => 'PAY-WAL-' . strtoupper(Str::random(12)),
+            'methode_paiement' => MethodePaiement::PORTEFEUILLE,
+            'prestataire' => 'interne',
+            'montant' => $commande->montant_total,
+            'devise' => $portefeuille->devise,
+            'statut' => 'reussi',
+            'heure_paiement' => now(),
+        ]);
+
+        return $paiement;
+    }
+
+    /**
+     * Paiement par carte cadeau
+     */
+    private function payerParCarteCadeau(Commande $commande, string $codeCarte): Paiement
+    {
+        $carte = \App\Models\CarteCadeau::where('code', $codeCarte)->first();
+
+        if (!$carte || $carte->statut !== 'active') {
+            throw new \Exception('Carte cadeau invalide ou expirée');
+        }
+
+        if ($carte->montant_restant < $commande->montant_total) {
+            throw new \Exception('Solde carte cadeau insuffisant');
+        }
+
+        // Utiliser la carte
+        $carte->utiliser($commande->montant_total);
+
+        $paiement = Paiement::create([
+            'commande_id' => $commande->id,
+            'client_id' => $commande->client_id,
+            'reference_transaction' => 'PAY-GIFT-' . strtoupper(Str::random(12)),
+            'methode_paiement' => MethodePaiement::CARTE_CADEAU,
+            'prestataire' => 'interne',
+            'montant' => $commande->montant_total,
+            'devise' => $carte->devise,
+            'statut' => 'reussi',
+            'heure_paiement' => now(),
+        ]);
+
+        return $paiement;
+    }
+
+    /**
+     * Paiement espèces à la livraison
+     */
+    private function payerEspeces(Commande $commande): Paiement
+    {
+        return Paiement::create([
+            'commande_id' => $commande->id,
+            'client_id' => $commande->client_id,
+            'reference_transaction' => 'PAY-CASH-' . strtoupper(Str::random(12)),
+            'methode_paiement' => MethodePaiement::ESPECES_LIVRAISON,
+            'prestataire' => 'interne',
+            'montant' => $commande->montant_total,
+            'devise' => 'XOF',
+            'statut' => 'en_attente', // Sera confirmé à la livraison
+        ]);
+    }
+
+    /**
+     * Confirmer un paiement (après webhook ou confirmation manuelle)
+     */
+    public function confirmerPaiement(Paiement $paiement): void
+    {
+        if ($paiement->statut === 'reussi') {
+            return;
+        }
+
+        $paiement->update([
+            'statut' => 'reussi',
+            'heure_paiement' => now(),
+        ]);
+
+        $this->loggerTransaction($paiement, 'capture', $paiement->montant, 'reussi');
+
+        // Confirmer la commande
+        $paiement->commande->changerStatut(\App\Enums\StatutCommande::CONFIRMEE);
+    }
+
+    /**
+     * Rembourser un paiement
+     */
+    public function rembourser(Paiement $paiement, string $raison): void
+    {
+        if ($paiement->statut !== 'reussi') {
+            throw new \Exception('Seuls les paiements réussis peuvent être remboursés');
+        }
+
+        match($paiement->prestataire) {
+            'stripe' => $this->rembourserStripe($paiement, $raison),
+            'mtn' => $this->rembourserMtn($paiement, $raison),
+            'interne' => $this->rembourserInterne($paiement, $raison),
+            default => throw new \Exception('Remboursement non supporté pour ce prestataire'),
+        };
+    }
+
+    /**
+     * Traiter le webhook Stripe
+     */
+    public function traiterWebhookStripe($event): void
+    {
+        match($event->type) {
+            'payment_intent.succeeded' => $this->onStripePaymentSucceeded($event->data->object),
+            'payment_intent.payment_failed' => $this->onStripePaymentFailed($event->data->object),
+            'charge.refunded' => $this->onStripeRefunded($event->data->object),
+            default => Log::info("Stripe webhook non géré: {$event->type}"),
+        };
+    }
+
+    /**
+     * Traiter le webhook MTN
+     */
+    public function traiterWebhookMtn(array $data): void
+    {
+        $reference = $data['reference'] ?? null;
+        $paiement = Paiement::where('reference_prestataire', $reference)->first();
+
+        if (!$paiement) {
+            Log::warning('Webhook MTN: paiement introuvable', $data);
+            return;
+        }
+
+        if ($data['status'] === 'successful') {
+            $this->confirmerPaiement($paiement);
+        } elseif ($data['status'] === 'failed') {
+            $paiement->update(['statut' => 'echoue']);
+        }
+    }
+
+    // ===== MÉTHODES PRIVÉES =====
+
+    private function loggerTransaction(Paiement $paiement, string $type, float $montant, string $statut, array $donnees = []): void
+    {
+        TransactionPaiement::create([
+            'paiement_id' => $paiement->id,
+            'type_transaction' => $type,
+            'montant' => $montant,
+            'statut' => $statut,
+            'donnees_reponse' => $donnees,
+            'adresse_ip' => request()->ip(),
+        ]);
+    }
+
+    private function appelerApiMtn($paiement, $telephone): array
+    {
+        // TODO: Implémenter appel API MTN MoMo
+        return [
+            'transaction_id' => 'MTN-' . Str::random(16),
+            'status' => 'pending',
+        ];
+    }
+
+    private function appelerApiMoov($paiement, $telephone): array
+    {
+        // TODO: Implémenter appel API Moov
+        return ['transaction_id' => 'MOOV-' . Str::random(16)];
+    }
+
+    private function appelerApiOrangeMoney($paiement, $telephone): array
+    {
+        // TODO: Implémenter appel API Orange Money
+        return ['transaction_id' => 'OM-' . Str::random(16)];
+    }
+
+    private function appelerApiWave($paiement, $telephone): array
+    {
+        // TODO: Implémenter appel API Wave
+        return ['transaction_id' => 'WAVE-' . Str::random(16)];
+    }
+
+    private function appelerApiPaypal($paiement): array
+    {
+        // TODO: Implémenter appel API PayPal
+        return ['order_id' => 'PAYPAL-' . Str::random(16)];
+    }
+
+    private function rembourserStripe($paiement, string $raison): void
+    {
+        \Stripe\Refund::create([
+            'payment_intent' => $paiement->reference_prestataire,
+        ]);
+
+        $paiement->update(['statut' => 'rembourse']);
+
+        Remboursement::create([
+            'paiement_id' => $paiement->id,
+            'commande_id' => $paiement->commande_id,
+            'montant' => $paiement->montant,
+            'raison' => $raison,
+            'statut' => 'effectue',
+            'heure_traitement' => now(),
+        ]);
+    }
+
+    private function rembourserMtn($paiement, string $raison): void
+    {
+        // TODO: API remboursement MTN
+        $paiement->update(['statut' => 'rembourse']);
+    }
+
+    private function rembourserInterne($paiement, string $raison): void
+    {
+        // Rembourser le portefeuille
+        $portefeuille = $paiement->client->portefeuille;
+        if ($portefeuille) {
+            $portefeuille->crediter($paiement->montant, "Remboursement commande #{$paiement->commande->numero}");
+        }
+
+        $paiement->update(['statut' => 'rembourse']);
+    }
+
+    private function onStripePaymentSucceeded($paymentIntent): void
+    {
+        $paiement = Paiement::where('reference_prestataire', $paymentIntent->id)->first();
+        
+        if ($paiement) {
+            $this->confirmerPaiement($paiement);
+        }
+    }
+
+    private function onStripePaymentFailed($paymentIntent): void
+    {
+        $paiement = Paiement::where('reference_prestataire', $paymentIntent->id)->first();
+        
+        if ($paiement) {
+            $paiement->update(['statut' => 'echoue']);
+            $this->loggerTransaction($paiement, 'autorisation', $paiement->montant, 'echoue', [
+                'error' => $paymentIntent->last_payment_error?->message ?? 'Paiement échoué',
+            ]);
+        }
+    }
+
+    private function onStripeRefunded($charge): void
+    {
+        $paiement = Paiement::where('reference_prestataire', $charge->payment_intent)->first();
+        
+        if ($paiement) {
+            $paiement->update(['statut' => 'rembourse']);
+        }
+    }
+}
+```
+
+---
+
+## 🚚 4. DELIVERY SERVICE
+
+### 4.1 `app/Services/DeliveryService.php`
+
+```php
+<?php
+
+namespace App\Services;
+
+use App\Models\Livraison;
+use App\Models\ProfilLivreur;
+use App\Models\Commande;
+use App\Models\SuiviLivraison;
+use App\Models\PreuveLivraison;
+use App\Enums\StatutCommande;
+use App\Exceptions\LivraisonNonAssigneeException;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+
+class DeliveryService
+{
+    public function __construct(
+        private NotificationService $notificationService
+    ) {}
+
+    /**
+     * Déclenche l'assignation automatique d'un livreur
+     */
+    public function declencherAssignationLivreur(Livraison $livraison): void
+    {
+        $livreur = $this->trouverMeilleurLivreur($livraison->commande);
+
+        if ($livreur) {
+            $this->assignerLivreur($livraison, $livreur);
+        } else {
+            Log::warning("Aucun livreur disponible pour la livraison {$livraison->id}");
+            // TODO: Mettre en file d'attente et réessayer plus tard
+        }
+    }
+
+    /**
+     * Trouve le meilleur livreur disponible
+     */
+    public function trouverMeilleurLivreur(Commande $commande): ?ProfilLivreur
+    {
+        $restaurant = $commande->restaurant;
+
+        // Livreurs disponibles dans un rayon de 5km
+        $livreurs = ProfilLivreur::disponibles()
+            ->dansZone(
+                $restaurant->latitude,
+                $restaurant->longitude,
+                5
+            )
+            ->with('utilisateur')
+            ->get();
+
+        if ($livreurs->isEmpty()) {
+            return null;
+        }
+
+        // Calculer un score pour chaque livreur
+        $livreursScores = $livreurs->map(function ($livreur) use ($restaurant) {
+            $distance = $this->calculerDistance(
+                $restaurant->latitude,
+                $restaurant->longitude,
+                $livreur->latitude_courante,
+                $livreur->longitude_courante
+            );
+
+            // Score : note (0-5) * 20 + (10 - distance) * 5
+            $score = ($livreur->note * 20) + (max(0, 10 - $distance) * 5);
+
+            return [
+                'livreur' => $livreur,
+                'score' => $score,
+                'distance' => $distance,
+            ];
+        });
+
+        // Retourner le livreur avec le meilleur score
+        $meilleur = $livreursScores->sortByDesc('score')->first();
+
+        return $meilleur['livreur'];
+    }
+
+    /**
+     * Assigne un livreur à une livraison
+     */
+    public function assignerLivreur(Livraison $livraison, ProfilLivreur $livreur): void
+    {
+        DB::transaction(function () use ($livraison, $livreur) {
+            $livraison->update([
+                'livreur_id' => $livreur->id,
+                'statut' => 'assignee',
+                'heure_prise_en_charge' => now(),
+            ]);
+
+            $livreur->update(['est_disponible' => false]);
+
+            // Notifier le livreur
+            $this->notificationService->notifierLivreurNouvelleMission($livraison);
+            
+            // Notifier le client
+            $this->notificationService->notifierClientLivreurAssign($livraison);
+
+            Log::info("Livraison {$livraison->id} assignée au livreur {$livreur->id}");
+        });
+    }
+
+    /**
+     * Change le statut d'une livraison
+     */
+    public function changerStatut(Livraison $livraison, string $nouveauStatut): void
+    {
+        $transitions = [
+            'assignee' => ['en_route_restaurant'],
+            'en_route_restaurant' => ['recuperee'],
+            'recuperee' => ['en_livraison'],
+            'en_livraison' => ['livree'],
+        ];
+
+        $statutActuel = $livraison->statut;
+        $transitionsPossibles = $transitions[$statutActuel] ?? [];
+
+        if (!in_array($nouveauStatut, $transitionsPossibles)) {
+            throw new \Exception("Transition de statut invalide: {$statutActuel} → {$nouveauStatut}");
+        }
+
+        $livraison->update(['statut' => $nouveauStatut]);
+
+        // Synchroniser avec la commande
+        $this->synchroniserStatutCommande($livraison, $nouveauStatut);
+
+        // Notifier le client
+        $this->notificationService->notifierClientStatutLivraison($livraison);
+    }
+
+    /**
+     * Enregistre la position du livreur
+     */
+    public function enregistrerPosition(Livraison $livraison, ProfilLivreur $livreur, float $lat, float $lng, ?float $vitesse = null, ?float $direction = null): void
+    {
+        // Mettre à jour la position du livreur
+        $livreur->mettreAJourLocalisation($lat, $lng);
+
+        // Enregistrer le suivi
+        SuiviLivraison::create([
+            'livraison_id' => $livraison->id,
+            'livreur_id' => $livreur->id,
+            'latitude' => $lat,
+            'longitude' => $lng,
+            'vitesse' => $vitesse,
+            'direction' => $direction,
+        ]);
+
+        // Broadcast en temps réel
+        broadcast(new \App\Events\LivraisonPositionUpdated($livraison->id, [
+            'lat' => $lat,
+            'lng' => $lng,
+        ]))->toOthers();
+    }
+
+    /**
+     * Marque une livraison comme livrée
+     */
+    public function marquerLivree(Livraison $livraison, array $donneesPreuve): void
+    {
+        DB::transaction(function () use ($livraison, $donneesPreuve) {
+            
+            // Créer la preuve de livraison
+            $preuve = PreuveLivraison::create([
+                'livraison_id' => $livraison->id,
+                'type_preuve' => $donneesPreuve['type_preuve'],
+                'chemin_fichier' => $donneesPreuve['chemin_fichier'] ?? null,
+                'signature_base64' => $donneesPreuve['signature_base64'] ?? null,
+                'code_confirmation' => $donneesPreuve['code_confirmation'] ?? null,
+                'nom_destinataire' => $donneesPreuve['nom_destinataire'] ?? null,
+                'latitude' => $donneesPreuve['latitude'] ?? null,
+                'longitude' => $donneesPreuve['longitude'] ?? null,
+            ]);
+
+            // Mettre à jour la livraison
+            $livraison->update([
+                'statut' => 'livree',
+                'heure_livraison' => now(),
+            ]);
+
+            // Créditer le livreur
+            $livreur = $livraison->livreur;
+            $livreur->increment('total_livraisons');
+            $livreur->increment('total_gains', $livraison->commission_livreur);
+            $livreur->update(['est_disponible' => true]);
+
+            // Mettre à jour la commande
+            $livraison->commande->changerStatut(StatutCommande::LIVREE);
+
+            // Notifier
+            $this->notificationService->notifierLivraisonEffectuee($livraison);
+
+            Log::info("Livraison {$livraison->id} marquée comme livrée");
+        });
+    }
+
+    /**
+     * Calcule les frais de livraison selon la zone
+     */
+    public function calculerFraisLivraison($restaurant, $adresse): float
+    {
+        $zones = $restaurant->zonesLivraison()->actives()->get();
+        
+        foreach ($zones as $zone) {
+            if ($zone->contientPoint($adresse->latitude, $adresse->longitude)) {
+                return $zone->frais_livraison;
+            }
+        }
+        
+        // Frais par défaut si hors zone
+        return 1500;
+    }
+
+    /**
+     * Calcule la distance entre 2 points (formule Haversine)
+     */
+    public function calculerDistance(float $lat1, float $lon1, float $lat2, float $lon2): float
+    {
+        $rayonTerre = 6371; // km
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLon = deg2rad($lon2 - $lon1);
+
+        $a = sin($dLat / 2) * sin($dLat / 2) +
+             cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
+             sin($dLon / 2) * sin($dLon / 2);
+
+        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+
+        return $rayonTerre * $c;
+    }
+
+    // ===== MÉTHODES PRIVÉES =====
+
+    private function synchroniserStatutCommande(Livraison $livraison, string $statutLivraison): void
+    {
+        $statutCommande = match($statutLivraison) {
+            'en_livraison' => StatutCommande::EN_LIVRAISON,
+            'livree' => StatutCommande::LIVREE,
+            default => null,
+        };
+
+        if ($statutCommande) {
+            $livraison->commande->changerStatut($statutCommande);
+        }
+    }
+}
+```
+
+---
+
+## 📅 5. RESERVATION SERVICE
+
+### 5.1 `app/Services/ReservationService.php`
+
+```php
+<?php
+
+namespace App\Services;
+
+use App\Models\Reservation;
+use App\Models\Restaurant;
+use App\Models\ProfilClient;
+use App\Exceptions\ReservationIndisponibleException;
+use Illuminate\Support\Facades\DB;
+use Carbon\Carbon;
+
+class ReservationService
+{
+    public function __construct(
+        private NotificationService $notificationService
+    ) {}
+
+    /**
+     * Crée une réservation
+     */
+    public function creerReservation(ProfilClient $client, array $donnees): Reservation
+    {
+        return DB::transaction(function () use ($client, $donnees) {
+            
+            $restaurant = Restaurant::findOrFail($donnees['restaurant_id']);
+
+            // Vérifier disponibilité
+            $this->verifierDisponibilite($restaurant, $donnees);
+
+            // Trouver une table disponible
+            $table = $this->trouverTableDisponible($restaurant, $donnees);
+
+            if (!$table) {
+                throw new ReservationIndisponibleException('Aucune table disponible pour ce créneau');
+            }
+
+            // Créer la réservation
+            $reservation = Reservation::create([
+                'client_id' => $client->id,
+                'restaurant_id' => $restaurant->id,
+                'table_id' => $table->id,
+                'salle_id' => $table->salle_id,
+                'date_reservation' => $donnees['date_reservation'],
+                'heure_reservation' => $donnees['heure_reservation'],
+                'duree_minutes' => $donnees['duree_minutes'] ?? 120,
+                'nombre_personnes' => $donnees['nombre_personnes'],
+                'statut' => 'en_attente',
+                'nom_client' => $donnees['nom_client'] ?? $client->utilisateur->nom_complet,
+                'telephone_client' => $donnees['telephone_client'] ?? $client->utilisateur->telephone,
+                'email_client' => $donnees['email_client'] ?? $client->utilisateur->email,
+                'occasion_speciale' => $donnees['occasion_speciale'] ?? null,
+                'notes' => $donnees['notes'] ?? null,
+            ]);
+
+            // Notifier le restaurant
+            $this->notificationService->notifierRestaurantNouvelleReservation($reservation);
+
+            // Confirmer au client
+            $this->notificationService->confirmerReservationClient($reservation);
+
+            return $reservation;
+        });
+    }
+
+    /**
+     * Confirme une réservation (par le restaurant)
+     */
+    public function confirmerReservation(Reservation $reservation): void
+    {
+        $reservation->changerStatut('confirmee');
+        $this->notificationService->confirmerReservationClient($reservation);
+    }
+
+    /**
+     * Refuse une réservation
+     */
+    public function refuserReservation(Reservation $reservation, string $raison): void
+    {
+        $reservation->changerStatut('refusee', $raison);
+        $this->notificationService->notifierReservationRefusee($reservation, $raison);
+    }
+
+    /**
+     * Annule une réservation
+     */
+    public function annulerReservation(Reservation $reservation, string $raison): void
+    {
+        $reservation->changerStatut('annulee', $raison);
+        $this->notificationService->notifierReservationAnnulee($reservation, $raison);
+    }
+
+    /**
+     * Marque une réservation comme terminée
+     */
+    public function terminerReservation(Reservation $reservation, ?float $montantDepense = null): void
+    {
+        $reservation->update([
+            'statut' => 'terminee',
+            'montant_depense' => $montantDepense,
+        ]);
+    }
+
+    /**
+     * Marque un no-show
+     */
+    public function marquerNoShow(Reservation $reservation): void
+    {
+        $reservation->update([
+            'statut' => 'no_show',
+            'est_no_show' => true,
+        ]);
+
+        $this->notificationService->notifierNoShow($reservation);
+    }
+
+    /**
+     * Récupère les créneaux disponibles pour un restaurant
+     */
+    public function getCreneauxDisponibles(Restaurant $restaurant, string $date, int $nombrePersonnes): array
+    {
+        $creneaux = [];
+        $horaires = $restaurant->horaires()->where('jour_semaine', Carbon::parse($date)->dayOfWeek)->first();
+
+        if (!$horaires || $horaires->est_ferme) {
+            return [];
+        }
+
+        $ouverture = Carbon::parse($horaires->heure_ouverture);
+        $fermeture = Carbon::parse($horaires->heure_fermeture);
+        $interval = 30; // Créneaux de 30 minutes
+
+        $creneau = $ouverture->copy();
+
+        while ($creneau->lt($fermeture->copy()->subMinutes(60))) {
+            $disponible = $this->verifierCreneauDisponible($restaurant, $date, $creneau->format('H:i:s'), $nombrePersonnes);
+            
+            if ($disponible) {
+                $creneaux[] = [
+                    'heure' => $creneau->format('H:i'),
+                    'disponible' => true,
+                ];
+            }
+
+            $creneau->addMinutes($interval);
+        }
+
+        return $creneaux;
+    }
+
+    /**
+     * Envoie les rappels de réservation (à appeler via cron)
+     */
+    public function envoyerRappels(): void
+    {
+        $reservations = Reservation::confirmees()
+            ->whereDate('date_reservation', now()->addDay()->toDateString())
+            ->get();
+
+        foreach ($reservations as $reservation) {
+            $this->notificationService->rappelerReservation($reservation);
+        }
+    }
+
+    // ===== MÉTHODES PRIVÉES =====
+
+    private function verifierDisponibilite(Restaurant $restaurant, array $donnees): void
+    {
+        $date = Carbon::parse($donnees['date_reservation']);
+        $heure = $donnees['heure_reservation'];
+
+        // Vérifier que le restaurant est ouvert ce jour-là
+        $jourSemaine = $date->dayOfWeek;
+        $horaire = $restaurant->horaires()->where('jour_semaine', $jourSemaine)->first();
+
+        if (!$horaire || $horaire->est_ferme) {
+            throw new ReservationIndisponibleException('Le restaurant est fermé ce jour-là');
+        }
+
+        // Vérifier les horaires
+        $heureReservation = Carbon::parse($date->format('Y-m-d') . ' ' . $heure);
+        $ouverture = Carbon::parse($date->format('Y-m-d') . ' ' . $horaire->heure_ouverture);
+        $fermeture = Carbon::parse($date->format('Y-m-d') . ' ' . $horaire->heure_fermeture);
+
+        if ($heureReservation->lt($ouverture) || $heureReservation->gt($fermeture->subMinutes(60))) {
+            throw new ReservationIndisponibleException('Horaire en dehors des heures d\'ouverture');
+        }
+
+        // Vérifier fermetures spéciales
+        $fermetureSpeciale = $restaurant->fermeturesSpeciales()
+            ->where('date_debut', '<=', $date)
+            ->where('date_fin', '>=', $date)
+            ->exists();
+
+        if ($fermetureSpeciale) {
+            throw new ReservationIndisponibleException('Le restaurant est fermé pour une raison exceptionnelle');
+        }
+    }
+
+    private function trouverTableDisponible(Restaurant $restaurant, array $donnees)
+    {
+        $date = $donnees['date_reservation'];
+        $heure = $donnees['heure_reservation'];
+        $duree = $donnees['duree_minutes'] ?? 120;
+        $nbPersonnes = $donnees['nombre_personnes'];
+
+        // Trouver les tables avec assez de places
+        $tables = $restaurant->tables()
+            ->where('est_active', true)
+            ->where('places', '>=', $nbPersonnes)
+            ->get();
+
+        foreach ($tables as $table) {
+            // Vérifier qu'il n'y a pas de conflit de réservation
+            $conflit = Reservation::where('restaurant_id', $restaurant->id)
+                ->where('table_id', $table->id)
+                ->where('date_reservation', $date)
+                ->whereIn('statut', ['en_attente', 'confirmee'])
+                ->where(function($query) use ($heure, $duree) {
+                    $finReservation = Carbon::parse($heure)->addMinutes($duree);
+                    $query->whereBetween('heure_reservation', [$heure, $finReservation->format('H:i:s')])
+                          ->orWhereRaw("ADDTIME(heure_reservation, SEC_TO_TIME(? * 60)) > ?", [$duree, $heure]);
+                })
+                ->exists();
+
+            if (!$conflit) {
+                return $table;
+            }
+        }
+
+        return null;
+    }
+
+    private function verifierCreneauDisponible(Restaurant $restaurant, string $date, string $heure, int $nbPersonnes): bool
+    {
+        $reservations = Reservation::where('restaurant_id', $restaurant->id)
+            ->where('date_reservation', $date)
+            ->whereIn('statut', ['en_attente', 'confirmee'])
+            ->count();
+
+        // Vérifier si la capacité totale n'est pas dépassée
+        $capaciteTotale = $restaurant->salles()->sum('capacite');
+        $personnesReservees = Reservation::where('restaurant_id', $restaurant->id)
+            ->where('date_reservation', $date)
+            ->whereIn('statut', ['en_attente', 'confirmee'])
+            ->where('heure_reservation', $heure)
+            ->sum('nombre_personnes');
+
+        return ($personnesReservees + $nbPersonnes) <= $capaciteTotale;
+    }
+}
+```
+
+---
+
+## 🎁 6. LOYALTY SERVICE
+
+### 6.1 `app/Services/LoyaltyService.php`
+
+```php
+<?php
+
+namespace App\Services;
+
+use App\Models\ProfilClient;
+use App\Models\TransactionFidelite;
+use App\Models\Commande;
+
+class LoyaltyService
+{
+    /**
+     * Attribue des points de fidélité
+     */
+    public function attribuerPoints(ProfilClient $client, int $points, string $description, ?Commande $commande = null): void
+    {
+        $ancienSolde = $client->points_fidelite;
+        $client->increment('points_fidelite', $points);
+
+        TransactionFidelite::create([
+            'client_id' => $client->id,
+            'commande_id' => $commande?->id,
+            'type_transaction' => 'gain',
+            'nombre_points' => $points,
+            'solde_avant' => $ancienSolde,
+            'solde_apres' => $client->points_fidelite,
+            'description' => $description,
+        ]);
+    }
+
+    /**
+     * Utilise des points de fidélité
+     */
+    public function utiliserPoints(ProfilClient $client, int $points, string $description): bool
+    {
+        if ($client->points_fidelite < $points) {
+            return false;
+        }
+
+        $ancienSolde = $client->points_fidelite;
+        $client->decrement('points_fidelite', $points);
+
+        TransactionFidelite::create([
+            'client_id' => $client->id,
+            'type_transaction' => 'utilisation',
+            'nombre_points' => -$points,
+            'solde_avant' => $ancienSolde,
+            'solde_apres' => $client->points_fidelite,
+            'description' => $description,
+        ]);
+
+        return true;
+    }
+
+    /**
+     * Convertit des points en réduction monétaire
+     */
+    public function convertirPointsEnReduction(int $points): float
+    {
+        // 100 points = 10 FCFA de réduction
+        return ($points / 100) * 10;
+    }
+
+    /**
+     * Calcule les points à attribuer pour une commande
+     */
+    public function calculerPointsPourCommande(Commande $commande): int
+    {
+        // 1 point par 100 FCFA dépensés
+        return (int) floor($commande->montant_total / 100);
+    }
+
+    /**
+     * Fait expirer les points anciens (plus de 12 mois)
+     */
+    public function faireExpirerPoints(): void
+    {
+        $dateLimite = now()->subYear();
+
+        $transactions = TransactionFidelite::where('type_transaction', 'gain')
+            ->where('cree_le', '<', $dateLimite)
+            ->whereNull('commande_id') // Points bonus
+            ->get();
+
+        foreach ($transactions as $transaction) {
+            $client = $transaction->client;
+            $pointsAAjuster = $transaction->nombre_points;
+
+            if ($client->points_fidelite >= $pointsAAjuster) {
+                $ancienSolde = $client->points_fidelite;
+                $client->decrement('points_fidelite', $pointsAAjuster);
+
+                TransactionFidelite::create([
+                    'client_id' => $client->id,
+                    'type_transaction' => 'expiration',
+                    'nombre_points' => -$pointsAAjuster,
+                    'solde_avant' => $ancienSolde,
+                    'solde_apres' => $client->points_fidelite,
+                    'description' => 'Expiration des points (plus de 12 mois)',
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Obtient le niveau de fidélité d'un client
+     */
+    public function getNiveauFidelite(ProfilClient $client): array
+    {
+        $points = $client->points_fidelite;
+
+        $niveaux = [
+            ['nom' => 'Standard', 'min' => 0, 'max' => 49, 'couleur' => 'gray'],
+            ['nom' => 'Bronze', 'min' => 50, 'max' => 199, 'couleur' => '#cd7f32'],
+            ['nom' => 'Argent', 'min' => 200, 'max' => 499, 'couleur' => '#c0c0c0'],
+            ['nom' => 'Or', 'min' => 500, 'max' => 999, 'couleur' => '#ffd700'],
+            ['nom' => 'Platine', 'min' => 1000, 'max' => PHP_INT_MAX, 'couleur' => '#e5e4e2'],
+        ];
+
+        foreach ($niveaux as $niveau) {
+            if ($points >= $niveau['min'] && $points <= $niveau['max']) {
+                return $niveau;
+            }
+        }
+
+        return $niveaux[0];
+    }
+}
+```
+
+---
+
+## 🔔 7. NOTIFICATION SERVICE
+
+### 7.1 `app/Services/NotificationService.php`
+
+```php
+<?php
+
+namespace App\Services;
+
+use App\Models\Commande;
+use App\Models\Reservation;
+use App\Models\Livraison;
+use App\Models\Utilisateur;
+use App\Models\Notification;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Log;
+
+class NotificationService
+{
+    /**
+     * Notifie le restaurant d'une nouvelle commande
+     */
+    public function notifierRestaurantNouvelleCommande(Commande $commande): void
+    {
+        $restaurant = $commande->restaurant;
+        
+        // Email au gérant
+        if ($restaurant->gerant && $restaurant->gerant->utilisateur) {
+            $this->envoyerEmail(
+                $restaurant->gerant->utilisateur->email,
+                "Nouvelle commande #{$commande->numero}",
+                'emails.restaurant.nouvelle-commande',
+                ['commande' => $commande]
+            );
+        }
+
+        // Notification in-app
+        $this->creerNotification(
+            $restaurant->gerant?->utilisateur_id,
+            'nouvelle_commande',
+            'Nouvelle commande reçue',
+            "Commande #{$commande->numero} - {$commande->montant_total} FCFA",
+            'in_app'
+        );
+    }
+
+    /**
+     * Confirme la commande au client
+     */
+    public function confirmerCommandeClient(Commande $commande): void
+    {
+        $client = $commande->client->utilisateur;
+
+        // Email
+        $this->envoyerEmail(
+            $client->email,
+            "Confirmation de votre commande #{$commande->numero}",
+            'emails.client.confirmation-commande',
+            ['commande' => $commande]
+        );
+
+        // SMS
+        if ($client->telephone) {
+            $this->envoyerSms(
+                $client->telephone,
+                "Votre commande #{$commande->numero} a été confirmée. Montant: {$commande->montant_total} FCFA"
+            );
+        }
+
+        // Notification in-app
+        $this->creerNotification(
+            $client->id,
+            'commande_confirmee',
+            'Commande confirmée',
+            "Votre commande #{$commande->numero} est en cours de préparation",
+            'in_app'
+        );
+
+        // Push notification
+        $this->envoyerPush(
+            $client->id,
+            'Commande confirmée',
+            "Votre commande #{$commande->numero} est en cours de préparation"
+        );
+    }
+
+    /**
+     * Notifie le changement de statut de commande
+     */
+    public function notifierChangementStatutCommande(Commande $commande, $ancienStatut, $nouveauStatut): void
+    {
+        $client = $commande->client->utilisateur;
+
+        $messages = [
+            'confirmee' => 'Votre commande a été confirmée',
+            'en_preparation' => 'Votre commande est en cours de préparation',
+            'prete' => 'Votre commande est prête !',
+            'en_livraison' => 'Votre commande est en cours de livraison',
+            'livree' => 'Votre commande a été livrée',
+        ];
+
+        $message = $messages[$nouveauStatut->value] ?? null;
+
+        if ($message) {
+            $this->creerNotification(
+                $client->id,
+                'statut_commande',
+                'Mise à jour de votre commande',
+                $message,
+                'in_app'
+            );
+
+            $this->envoyerPush($client->id, 'Commande', $message);
+
+            if ($client->telephone) {
+                $this->envoyerSms($client->telephone, $message);
+            }
+        }
+    }
+
+    /**
+     * Notifie l'annulation d'une commande
+     */
+    public function notifierAnnulationCommande(Commande $commande, string $raison): void
+    {
+        $client = $commande->client->utilisateur;
+
+        $this->envoyerEmail(
+            $client->email,
+            "Annulation de votre commande #{$commande->numero}",
+            'emails.client.annulation-commande',
+            ['commande' => $commande, 'raison' => $raison]
+        );
+
+        $this->creerNotification(
+            $client->id,
+            'commande_annulee',
+            'Commande annulée',
+            "Votre commande #{$commande->numero} a été annulée",
+            'in_app'
+        );
+    }
+
+    /**
+     * Notifie le livreur d'une nouvelle mission
+     */
+    public function notifierLivreurNouvelleMission(Livraison $livraison): void
+    {
+        $livreur = $livraison->livreur->utilisateur;
+
+        $this->creerNotification(
+            $livreur->id,
+            'nouvelle_mission',
+            'Nouvelle livraison disponible',
+            "Commande #{$livraison->commande->numero} à livrer",
+            'in_app'
+        );
+
+        $this->envoyerPush(
+            $livreur->id,
+            'Nouvelle mission',
+            "Commande #{$livraison->commande->numero} à livrer"
+        );
+    }
+
+    /**
+     * Notifie le client qu'un livreur a été assigné
+     */
+    public function notifierClientLivreurAssign(Livraison $livraison): void
+    {
+        $client = $livraison->commande->client->utilisateur;
+        $livreurNom = $livraison->livreur->utilisateur->nom_complet;
+
+        $this->creerNotification(
+            $client->id,
+            'livreur_assigne',
+            'Livreur en route',
+            "{$livreurNom} va livrer votre commande",
+            'in_app'
+        );
+
+        $this->envoyerPush($client->id, 'Livreur assigné', "{$livreurNom} va livrer votre commande");
+    }
+
+    /**
+     * Demande un avis au client après livraison
+     */
+    public function demanderAvisClient(Commande $commande): void
+    {
+        $client = $commande->client->utilisateur;
+
+        $this->envoyerEmail(
+            $client->email,
+            'Comment s\'est passée votre commande ?',
+            'emails.client.demande-avis',
+            ['commande' => $commande]
+        );
+    }
+
+    /**
+     * Notifie le restaurant d'une nouvelle réservation
+     */
+    public function notifierRestaurantNouvelleReservation(Reservation $reservation): void
+    {
+        $restaurant = $reservation->restaurant;
+
+        if ($restaurant->gerant && $restaurant->gerant->utilisateur) {
+            $this->envoyerEmail(
+                $restaurant->gerant->utilisateur->email,
+                "Nouvelle réservation - {$reservation->date_reservation}",
+                'emails.restaurant.nouvelle-reservation',
+                ['reservation' => $reservation]
+            );
+        }
+    }
+
+    /**
+     * Confirme la réservation au client
+     */
+    public function confirmerReservationClient(Reservation $reservation): void
+    {
+        $this->envoyerEmail(
+            $reservation->email_client,
+            "Confirmation de votre réservation",
+            'emails.client.confirmation-reservation',
+            ['reservation' => $reservation]
+        );
+
+        if ($reservation->telephone_client) {
+            $this->envoyerSms(
+                $reservation->telephone_client,
+                "Votre réservation du {$reservation->date_reservation} à {$reservation->heure_reservation} est confirmée"
+            );
+        }
+    }
+
+    /**
+     * Envoie un rappel de réservation
+     */
+    public function rappelerReservation(Reservation $reservation): void
+    {
+        if ($reservation->telephone_client) {
+            $this->envoyerSms(
+                $reservation->telephone_client,
+                "Rappel : Votre réservation demain à {$reservation->heure_reservation} pour {$reservation->nombre_personnes} personnes"
+            );
+        }
+    }
+
+    // ===== MÉTHODES PRIVÉES =====
+
+    private function envoyerEmail(string $email, string $sujet, string $vue, array $donnees): void
+    {
+        try {
+            Mail::send($vue, $donnees, function ($message) use ($email, $sujet) {
+                $message->to($email)->subject($sujet);
+            });
+        } catch (\Exception $e) {
+            Log::error("Erreur envoi email: {$e->getMessage()}", ['email' => $email, 'sujet' => $sujet]);
+        }
+    }
+
+    private function envoyerSms(string $telephone, string $message): void
+    {
+        try {
+            // TODO: Implémenter avec Twilio, OVH SMS, etc.
+            Log::info("SMS envoyé à {$telephone}: {$message}");
+        } catch (\Exception $e) {
+            Log::error("Erreur envoi SMS: {$e->getMessage()}");
+        }
+    }
+
+    private function envoyerPush(string $utilisateurId, string $titre, string $message): void
+    {
+        try {
+            // TODO: Implémenter avec Firebase Cloud Messaging
+            Log::info("Push envoyé à {$utilisateurId}: {$titre} - {$message}");
+        } catch (\Exception $e) {
+            Log::error("Erreur envoi push: {$e->getMessage()}");
+        }
+    }
+
+    private function creerNotification(?string $utilisateurId, string $type, string $titre, string $message, string $canal): void
+    {
+        if (!$utilisateurId) return;
+
+        Notification::create([
+            'utilisateur_id' => $utilisateurId,
+            'type' => $type,
+            'titre' => json_encode(['fr' => $titre]),
+            'message' => json_encode(['fr' => $message]),
+            'canal' => $canal,
+        ]);
+    }
+}
+```
+
+---
+
+## 💰 8. PRICING SERVICE
+
+### 8.1 `app/Services/PricingService.php`
+
+```php
+<?php
+
+namespace App\Services;
+
+use App\Models\Panier;
+use App\Models\CodePromo;
+use App\Models\Restaurant;
+
+class PricingService
+{
+    /**
+     * Calcule tous les totaux d'une commande
+     */
+    public function calculerTotauxCommande(Panier $panier, array $donnees): array
+    {
+        $restaurant = $panier->restaurant;
+        
+        // Sous-total
+        $sousTotal = $this->calculerSousTotal($panier);
+
+        // TVA
+        $tva = $this->calculerTva($sousTotal, $restaurant->taux_tva);
+
+        // Frais de livraison
+        $fraisLivraison = 0;
+        if ($donnees['type_commande'] === 'livraison' && !empty($donnees['adresse_livraison_id'])) {
+            $adresse = \App\Models\Adresse::find($donnees['adresse_livraison_id']);
+            $fraisLivraison = $this->calculerFraisLivraison($restaurant, $adresse);
+        }
+
+        // Code promo
+        $reduction = 0;
+        $codePromoId = null;
+        if (!empty($donnees['code_promo'])) {
+            $codePromo = CodePromo::where('code', strtoupper($donnees['code_promo']))->first();
+            
+            if ($codePromo) {
+                $commandeTemporaire = new \App\Models\Commande([
+                    'client_id' => $panier->client_id,
+                    'restaurant_id' => $panier->restaurant_id,
+                    'sous_total' => $sousTotal,
+                ]);
+
+                if ($codePromo->estValidePour($commandeTemporaire)) {
+                    $reduction = $codePromo->calculerReduction($sousTotal);
+                    $codePromoId = $codePromo->id;
+                }
+            }
+        }
+
+        // Total final
+        $total = $sousTotal + $fraisLivraison - $reduction;
+
+        return [
+            'sous_total' => round($sousTotal, 2),
+            'tva' => round($tva, 2),
+            'frais_livraison' => round($fraisLivraison, 2),
+            'reduction' => round($reduction, 2),
+            'total' => round(max(0, $total), 2),
+            'code_promo_id' => $codePromoId,
+        ];
+    }
+
+    /**
+     * Calcule le sous-total du panier
+     */
+    public function calculerSousTotal(Panier $panier): float
+    {
+        return $panier->lignes->sum(function ($ligne) {
+            $prixOptions = collect($ligne->options ?? [])->sum('prix');
+            return ($ligne->prix_unitaire + $prixOptions) * $ligne->quantite;
+        });
+    }
+
+    /**
+     * Calcule la TVA
+     */
+    public function calculerTva(float $sousTotal, float $tauxTva): float
+    {
+        $taux = $tauxTva / 100;
+        return $sousTotal * $taux / (1 + $taux);
+    }
+
+    /**
+     * Calcule les frais de livraison
+     */
+    public function calculerFraisLivraison(Restaurant $restaurant, $adresse): float
+    {
+        $zones = $restaurant->zonesLivraison()->actives()->get();
+        
+        foreach ($zones as $zone) {
+            if ($zone->contientPoint($adresse->latitude, $adresse->longitude)) {
+                return $zone->frais_livraison;
+            }
+        }
+        
+        return 1500; // Frais par défaut
+    }
+
+    /**
+     * Calcule le prix final d'un produit avec options
+     */
+    public function calculerPrixProduit($produit, ?string $varianteId = null, array $options = []): float
+    {
+        $prix = $produit->prix_actuel;
+
+        // Variante
+        if ($varianteId) {
+            $variante = $produit->variantes->find($varianteId);
+            if ($variante) {
+                $prix += $variante->modificateur_prix;
+            }
+        }
+
+        // Options (suppléments)
+        foreach ($options as $option) {
+            $prix += $option['prix'] ?? 0;
+        }
+
+        return $prix;
+    }
+}
+```
+
+---
+
