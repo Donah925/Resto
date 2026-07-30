@@ -1,1 +1,62 @@
-Nothing should be ignored since the changes only include PHP source files and exceptions classes, which are part of the core application code. No build artifacts, dependencies, or temporary files are present in the change list.
+# Dependencies
+vendor/
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Cache
+.cache/
+*.cache
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# PHP specific
+*.php~
+*.php.bak
+*.php.swp
+
+# PHPUnit
+.phpunit.result.cache
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Build and distribution
+dist/
+build/
+coverage/
+htmlcov/
+*.phar
+
+# Composer
+composer.lock
+vendor/composer/installed.json
+
+# Session
+sess_*
+
+# Testing
+.php_cs.cache
+.php_cs.dist.cache
+
+# Legacy
+CVS/
+.svn/
+.git/
+.hg/
