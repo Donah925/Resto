@@ -1,0 +1,2415 @@
+# 🔌 INTÉGRATION DES APIs TIERS - LARAVEL RESTAURANT
+
+Voici l'intégration complète de toutes les APIs externes nécessaires. Je vais structurer cela en **4 catégories** : Paiements, Communication, Cartes/Géo, et Services annexes.
+
+---
+
+## 📁 1. ARCHITECTURE GLOBALE
+
+```
+app/
+├── Services/
+│   ├── Payment/
+│   │   ├── Contracts/
+│   │   │   └── PaymentGatewayInterface.php
+│   │   ├── Gateways/
+│   │   │   ├── StripeGateway.php
+│   │   │   ├── MtnMomoGateway.php
+│   │   │   ├── MoovMoneyGateway.php
+│   │   │   ├── OrangeMoneyGateway.php
+│   │   │   ├── WaveGateway.php
+│   │   │   ├── PayPalGateway.php
+│   │   │   ├── PayeerGateway.php
+│   │   │   └── PayoneerGateway.php
+│   │   └── PaymentGatewayFactory.php
+│   ├── Sms/
+│   │   ├── SmsSenderInterface.php
+│   │   ├── TwilioSmsSender.php
+│   │   └── OrangeSmsSender.php
+│   ├── Email/
+│   │   └── BrevoMailService.php
+│   ├── Maps/
+│   │   └── GoogleMapsService.php
+│   ├── Storage/
+│   │   └── CloudinaryService.php
+│   ├── Search/
+│   │   └── MeilisearchService.php
+│   └── Translation/
+│       └── DeepLService.php
+config/
+├── payment.php
+├── sms.php
+└── services.php (modifié)
+```
+
+---
+
+## 💳 2. CONFIGURATION GÉNÉRALE
+
+### 2.1 `config/services.php` (ajouts)
+
+```php
+<?php
+
+return [
+    // ... configurations existantes ...
+
+    'stripe' => [
+        'key' => env('STRIPE_KEY'),
+        'secret' => env('STRIPE_SECRET'),
+        'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+    ],
+
+    'paypal' => [
+        'client_id' => env('PAYPAL_CLIENT_ID'),
+        'secret' => env('PAYPAL_SECRET'),
+        'mode' => env('PAYPAL_MODE', 'sandbox'), // sandbox ou live
+    ],
+
+    'mtn_momo' => [
+        'base_url' => env('MTN_MOMO_BASE_URL', 'https://api.mtn.com'),
+        'subscription_key' => env('MTN_MOMO_SUBSCRIPTION_KEY'),
+        'user_id' => env('MTN_MOMO_USER_ID'),
+        'api_key' => env('MTN_MOMO_API_KEY'),
+        'target_environment' => env('MTN_MOMO_ENV', 'sandbox'),
+    ],
+
+    'moov_money' => [
+        'base_url' => env('MOOV_MONEY_BASE_URL'),
+        'merchant_id' => env('MOOV_MONEY_MERCHANT_ID'),
+        'api_key' => env('MOOV_MONEY_API_KEY'),
+        'api_secret' => env('MOOV_MONEY_API_SECRET'),
+    ],
+
+    'orange_money' => [
+        'base_url' => env('ORANGE_MONEY_BASE_URL'),
+        'merchant_key' => env('ORANGE_MONEY_MERCHANT_KEY'),
+        'api_key' => env('ORANGE_MONEY_API_KEY'),
+    ],
+
+    'wave' => [
+        'base_url' => env('WAVE_BASE_URL', 'https://api.wave.com'),
+        'api_key' => env('WAVE_API_KEY'),
+        'webhook_secret' => env('WAVE_WEBHOOK_SECRET'),
+    ],
+
+    'payeer' => [
+        'merchant_id' => env('PAYEER_MERCHANT_ID'),
+        'secret_key' => env('PAYEER_SECRET_KEY'),
+        'base_url' => env('PAYEER_BASE_URL', 'https://payeer.com'),
+    ],
+
+    'payoneer' => [
+        'partner_username' => env('PAYONEER_PARTNER_USERNAME'),
+        'partner_password' => env('PAYONEER_PARTNER_PASSWORD'),
+        'partner_api_key' => env('PAYONEER_API_KEY'),
+        'base_url' => env('PAYONEER_BASE_URL', 'https://sandbox.payoneer.com'),
+    ],
+
+    'twilio' => [
+        'sid' => env('TWILIO_SID'),
+        'token' => env('TWILIO_TOKEN'),
+        'from' => env('TWILIO_FROM'),
+    ],
+
+    'orange_sms' => [
+        'client_id' => env('ORANGE_SMS_CLIENT_ID'),
+        'client_secret' => env('ORANGE_SMS_CLIENT_SECRET'),
+        'sender_name' => env('ORANGE_SMS_SENDER_NAME', 'RestoApp'),
+    ],
+
+    'brevo' => [
+        'api_key' => env('BREVO_API_KEY'),
+    ],
+
+    'google' => [
+        'maps_api_key' => env('GOOGLE_MAPS_API_KEY'),
+        'places_api_key' => env('GOOGLE_PLACES_API_KEY'),
+    ],
+
+    'cloudinary' => [
+        'cloud_name' => env('CLOUDINARY_CLOUD_NAME'),
+        'api_key' => env('CLOUDINARY_API_KEY'),
+        'api_secret' => env('CLOUDINARY_API_SECRET'),
+    ],
+
+    'deepl' => [
+        'api_key' => env('DEEPL_API_KEY'),
+    ],
+
+    'meilisearch' => [
+        'host' => env('MEILISEARCH_HOST', 'http://localhost:7700'),
+        'key' => env('MEILISEARCH_KEY'),
+    ],
+];
+```
+
+### 2.2 `.env` (exemple complet)
+
+```env
+# ===== STRIPE =====
+STRIPE_KEY=pk_test_xxxxxxxxxxxx
+STRIPE_SECRET=sk_test_xxxxxxxxxxxx
+STRIPE_WEBHOOK_SECRET=whsec_xxxxxxxxxxxx
+
+# ===== PAYPAL =====
+PAYPAL_CLIENT_ID=xxxxxxxxxxxx
+PAYPAL_SECRET=xxxxxxxxxxxx
+PAYPAL_MODE=sandbox
+
+# ===== MTN MOBILE MONEY =====
+MTN_MOMO_BASE_URL=https://sandbox.momodeveloper.mtn.com
+MTN_MOMO_SUBSCRIPTION_KEY=xxxxxxxxxxxx
+MTN_MOMO_USER_ID=xxxxxxxxxxxx
+MTN_MOMO_API_KEY=xxxxxxxxxxxx
+MTN_MOMO_ENV=sandbox
+
+# ===== MOOV MONEY =====
+MOOV_MONEY_BASE_URL=https://api.moov-africa.ci
+MOOV_MONEY_MERCHANT_ID=xxxxxxxxxxxx
+MOOV_MONEY_API_KEY=xxxxxxxxxxxx
+MOOV_MONEY_API_SECRET=xxxxxxxxxxxx
+
+# ===== ORANGE MONEY =====
+ORANGE_MONEY_BASE_URL=https://api.om.money
+ORANGE_MONEY_MERCHANT_KEY=xxxxxxxxxxxx
+ORANGE_MONEY_API_KEY=xxxxxxxxxxxx
+
+# ===== WAVE =====
+WAVE_BASE_URL=https://api.wave.com
+WAVE_API_KEY=xxxxxxxxxxxx
+WAVE_WEBHOOK_SECRET=xxxxxxxxxxxx
+
+# ===== PAYEER =====
+PAYEER_MERCHANT_ID=xxxxxxxxxxxx
+PAYEER_SECRET_KEY=xxxxxxxxxxxx
+
+# ===== PAYONEER =====
+PAYONEER_PARTNER_USERNAME=xxxxxxxxxxxx
+PAYONEER_PARTNER_PASSWORD=xxxxxxxxxxxx
+PAYONEER_API_KEY=xxxxxxxxxxxx
+
+# ===== SMS =====
+TWILIO_SID=ACxxxxxxxxxxxx
+TWILIO_TOKEN=xxxxxxxxxxxx
+TWILIO_FROM=+1234567890
+SMS_DRIVER=twilio  # ou 'orange'
+
+ORANGE_SMS_CLIENT_ID=xxxxxxxxxxxx
+ORANGE_SMS_CLIENT_SECRET=xxxxxxxxxxxx
+
+# ===== EMAIL =====
+BREVO_API_KEY=xkeysib-xxxxxxxxxxxx
+MAIL_MAILER=brevo
+
+# ===== GOOGLE MAPS =====
+GOOGLE_MAPS_API_KEY=AIzaXXXXXXXXXXXX
+GOOGLE_PLACES_API_KEY=AIzaXXXXXXXXXXXX
+
+# ===== CLOUDINARY =====
+CLOUDINARY_CLOUD_NAME=xxxxxxxxxxxx
+CLOUDINARY_API_KEY=xxxxxxxxxxxx
+CLOUDINARY_API_SECRET=xxxxxxxxxxxx
+
+# ===== DEEPL =====
+DEEPL_API_KEY=xxxxxxxxxxxx:fx
+
+# ===== MEILISEARCH =====
+MEILISEARCH_HOST=http://localhost:7700
+MEILISEARCH_KEY=masterKey_xxxxxxxxxxxx
+```
+
+---
+
+## 💰 3. MODULE PAIEMENT (Architecture Gateway)
+
+### 3.1 `app/Services/Payment/Contracts/PaymentGatewayInterface.php`
+
+```php
+<?php
+
+namespace App\Services\Payment\Contracts;
+
+use App\Models\Paiement;
+use App\Models\Commande;
+
+interface PaymentGatewayInterface
+{
+    /**
+     * Nom unique du prestataire
+     */
+    public function getName(): string;
+
+    /**
+     * Initie un paiement et retourne les données nécessaires au frontend
+     */
+    public function initiate(Commande $commande, array $options = []): array;
+
+    /**
+     * Vérifie le statut d'un paiement auprès du prestataire
+     */
+    public function checkStatus(Paiement $paiement): string;
+
+    /**
+     * Rembourse un paiement
+     */
+    public function refund(Paiement $paiement, float $amount = null, string $reason = ''): bool;
+
+    /**
+     * Traite un webhook entrant
+     */
+    public function handleWebhook(array $payload, array $headers = []): void;
+
+    /**
+     * Vérifie la signature d'un webhook
+     */
+    public function verifyWebhookSignature(array $payload, array $headers): bool;
+}
+```
+
+### 3.2 `app/Services/Payment/PaymentGatewayFactory.php`
+
+```php
+<?php
+
+namespace App\Services\Payment;
+
+use App\Enums\MethodePaiement;
+use App\Services\Payment\Contracts\PaymentGatewayInterface;
+use App\Services\Payment\Gateways\{
+    StripeGateway,
+    MtnMomoGateway,
+    MoovMoneyGateway,
+    OrangeMoneyGateway,
+    WaveGateway,
+    PayPalGateway,
+    PayeerGateway,
+    PayoneerGateway
+};
+
+class PaymentGatewayFactory
+{
+    public static function create(MethodePaiement $methode): PaymentGatewayInterface
+    {
+        return match($methode) {
+            MethodePaiement::CARTE_BANCAIRE => new StripeGateway(),
+            MethodePaiement::MTN_MOBILE_MONEY => new MtnMomoGateway(),
+            MethodePaiement::MOOV_MONEY => new MoovMoneyGateway(),
+            MethodePaiement::ORANGE_MONEY => new OrangeMoneyGateway(),
+            MethodePaiement::WAVE => new WaveGateway(),
+            MethodePaiement::PAYPAL => new PayPalGateway(),
+            MethodePaiement::PAYEER => new PayeerGateway(),
+            MethodePaiement::PAYONEER => new PayoneerGateway(),
+            default => throw new \InvalidArgumentException("Méthode de paiement non supportée: {$methode->value}"),
+        };
+    }
+}
+```
+
+### 3.3 `app/Services/Payment/Gateways/StripeGateway.php`
+
+```php
+<?php
+
+namespace App\Services\Payment\Gateways;
+
+use App\Models\Commande;
+use App\Models\Paiement;
+use App\Services\Payment\Contracts\PaymentGatewayInterface;
+use Stripe\PaymentIntent;
+use Stripe\Refund;
+use Stripe\Webhook;
+use Illuminate\Support\Str;
+
+class StripeGateway implements PaymentGatewayInterface
+{
+    public function __construct()
+    {
+        \Stripe\Stripe::setApiKey(config('services.stripe.secret'));
+    }
+
+    public function getName(): string
+    {
+        return 'stripe';
+    }
+
+    public function initiate(Commande $commande, array $options = []): array
+    {
+        $intent = PaymentIntent::create([
+            'amount' => (int) round($commande->montant_total * 100), // centimes
+            'currency' => strtolower($commande->restaurant->devise ?? 'xof'),
+            'description' => "Commande #{$commande->numero}",
+            'metadata' => [
+                'commande_id' => $commande->id,
+                'commande_numero' => $commande->numero,
+                'client_id' => $commande->client_id,
+                'restaurant_id' => $commande->restaurant_id,
+            ],
+            'automatic_payment_methods' => ['enabled' => true],
+        ]);
+
+        // Créer l'enregistrement Paiement
+        $paiement = Paiement::create([
+            'commande_id' => $commande->id,
+            'client_id' => $commande->client_id,
+            'reference_transaction' => 'PAY-' . strtoupper(Str::random(16)),
+            'reference_prestataire' => $intent->id,
+            'methode_paiement' => $options['methode'] ?? 'carte_bancaire',
+            'prestataire' => 'stripe',
+            'montant' => $commande->montant_total,
+            'devise' => $commande->restaurant->devise ?? 'XOF',
+            'statut' => 'en_attente',
+            'metadata' => ['client_secret' => $intent->client_secret],
+        ]);
+
+        return [
+            'paiement_id' => $paiement->id,
+            'client_secret' => $intent->client_secret,
+            'payment_intent_id' => $intent->id,
+        ];
+    }
+
+    public function checkStatus(Paiement $paiement): string
+    {
+        $intent = PaymentIntent::retrieve($paiement->reference_prestataire);
+
+        return match($intent->status) {
+            'succeeded' => 'reussi',
+            'processing', 'requires_action', 'requires_confirmation' => 'en_attente',
+            'canceled' => 'annule',
+            'requires_payment_method' => 'echoue',
+            default => 'en_attente',
+        };
+    }
+
+    public function refund(Paiement $paiement, float $amount = null, string $reason = ''): bool
+    {
+        try {
+            $refund = Refund::create([
+                'payment_intent' => $paiement->reference_prestataire,
+                'amount' => $amount ? (int) round($amount * 100) : null,
+                'metadata' => ['reason' => $reason],
+            ]);
+
+            $paiement->update([
+                'statut' => $amount && $amount < $paiement->montant 
+                    ? 'rembourse_partiellement' 
+                    : 'rembourse',
+                'metadata' => array_merge($paiement->metadata ?? [], ['refund_id' => $refund->id]),
+            ]);
+
+            return true;
+        } catch (\Exception $e) {
+            \Log::error('Erreur remboursement Stripe', ['error' => $e->getMessage()]);
+            return false;
+        }
+    }
+
+    public function handleWebhook(array $payload, array $headers = []): void
+    {
+        $event = $payload['type'] ?? null;
+        $data = $payload['data']['object'] ?? [];
+
+        match($event) {
+            'payment_intent.succeeded' => $this->onPaymentSucceeded($data),
+            'payment_intent.payment_failed' => $this->onPaymentFailed($data),
+            'charge.refunded' => $this->onRefunded($data),
+            default => \Log::info("Stripe webhook non géré: {$event}"),
+        };
+    }
+
+    public function verifyWebhookSignature(array $payload, array $headers): bool
+    {
+        try {
+            $sigHeader = $headers['Stripe-Signature'] ?? '';
+            Webhook::constructEvent(
+                json_encode($payload),
+                $sigHeader,
+                config('services.stripe.webhook_secret')
+            );
+            return true;
+        } catch (\Exception $e) {
+            \Log::error('Signature Stripe invalide', ['error' => $e->getMessage()]);
+            return false;
+        }
+    }
+
+    private function onPaymentSucceeded(array $data): void
+    {
+        $paiement = Paiement::where('reference_prestataire', $data['id'])->first();
+        if (!$paiement) return;
+
+        $paiement->update([
+            'statut' => 'reussi',
+            'heure_paiement' => now(),
+        ]);
+
+        // Confirmer la commande
+        $paiement->commande->changerStatut(\App\Enums\StatutCommande::CONFIRMEE);
+
+        // Émettre l'événement
+        event(new \App\Events\StatutCommandeModifie(
+            $paiement->commande,
+            \App\Enums\StatutCommande::EN_ATTENTE,
+            \App\Enums\StatutCommande::CONFIRMEE
+        ));
+    }
+
+    private function onPaymentFailed(array $data): void
+    {
+        $paiement = Paiement::where('reference_prestataire', $data['id'])->first();
+        if (!$paiement) return;
+
+        $paiement->update(['statut' => 'echoue']);
+    }
+
+    private function onRefunded(array $data): void
+    {
+        $paiement = Paiement::where('reference_prestataire', $data['payment_intent'] ?? '')->first();
+        if ($paiement) {
+            $paiement->update(['statut' => 'rembourse']);
+        }
+    }
+}
+```
+
+### 3.4 `app/Services/Payment/Gateways/MtnMomoGateway.php` (MTN Mobile Money)
+
+```php
+<?php
+
+namespace App\Services\Payment\Gateways;
+
+use App\Models\Commande;
+use App\Models\Paiement;
+use App\Services\Payment\Contracts\PaymentGatewayInterface;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
+
+class MtnMomoGateway implements PaymentGatewayInterface
+{
+    private string $baseUrl;
+    private string $subscriptionKey;
+    private string $userId;
+    private string $apiKey;
+
+    public function __construct()
+    {
+        $this->baseUrl = config('services.mtn_momo.base_url');
+        $this->subscriptionKey = config('services.mtn_momo.subscription_key');
+        $this->userId = config('services.mtn_momo.user_id');
+        $this->apiKey = config('services.mtn_momo.api_key');
+    }
+
+    public function getName(): string
+    {
+        return 'mtn';
+    }
+
+    public function initiate(Commande $commande, array $options = []): array
+    {
+        $referenceId = (string) Str::uuid();
+        $telephone = $options['telephone_mobile_money'] ?? $commande->client->utilisateur->telephone;
+
+        // Normaliser le numéro (format international)
+        $telephone = $this->normaliserTelephone($telephone);
+
+        // Étape 1 : Créer la requête de paiement
+        $response = Http::withHeaders([
+            'X-Reference-Id' => $referenceId,
+            'X-Target-Environment' => config('services.mtn_momo.target_environment'),
+            'X-Subscription-Key' => $this->subscriptionKey,
+            'Authorization' => 'Basic ' . base64_encode("{$this->userId}:{$this->apiKey}"),
+        ])->post("{$this->baseUrl}/collection/v1_0/requesttopay", [
+            'amount' => number_format($commande->montant_total, 0, '', ''),
+            'currency' => $commande->restaurant->devise ?? 'XOF',
+            'externalId' => $commande->numero,
+            'payer' => [
+                'partyIdType' => 'MSISDN',
+                'partyId' => $telephone,
+            ],
+            'payerMessage' => "Paiement commande #{$commande->numero}",
+            'payeeNote' => 'RestoApp',
+        ]);
+
+        // Créer l'enregistrement Paiement
+        $paiement = Paiement::create([
+            'commande_id' => $commande->id,
+            'client_id' => $commande->client_id,
+            'reference_transaction' => 'PAY-MTN-' . strtoupper(Str::random(12)),
+            'reference_prestataire' => $referenceId,
+            'methode_paiement' => 'mtn_mobile_money',
+            'prestataire' => 'mtn',
+            'montant' => $commande->montant_total,
+            'devise' => $commande->restaurant->devise ?? 'XOF',
+            'telephone_mobile_money' => $telephone,
+            'statut' => 'en_attente',
+            'metadata' => [
+                'response_status' => $response->status(),
+                'response_body' => $response->json(),
+            ],
+        ]);
+
+        return [
+            'paiement_id' => $paiement->id,
+            'reference_id' => $referenceId,
+            'status_code' => $response->status(),
+            // Le client doit approuver le paiement sur son téléphone via USSD
+            'instructions' => "Un message USSD a été envoyé au {$telephone}. Veuillez composer le code pour approuver.",
+        ];
+    }
+
+    public function checkStatus(Paiement $paiement): string
+    {
+        $response = Http::withHeaders([
+            'X-Subscription-Key' => $this->subscriptionKey,
+            'X-Target-Environment' => config('services.mtn_momo.target_environment'),
+            'Authorization' => 'Basic ' . base64_encode("{$this->userId}:{$this->apiKey}"),
+        ])->get("{$this->baseUrl}/collection/v1_0/requesttopay/{$paiement->reference_prestataire}");
+
+        if ($response->failed()) {
+            return 'en_attente';
+        }
+
+        $status = $response->json()['status'] ?? null;
+
+        return match($status) {
+            'SUCCESSFUL' => 'reussi',
+            'FAILED' => 'echoue',
+            'PENDING' => 'en_attente',
+            default => 'en_attente',
+        };
+    }
+
+    public function refund(Paiement $paiement, float $amount = null, string $reason = ''): bool
+    {
+        $referenceId = (string) Str::uuid();
+
+        $response = Http::withHeaders([
+            'X-Reference-Id' => $referenceId,
+            'X-Subscription-Key' => $this->subscriptionKey,
+            'X-Target-Environment' => config('services.mtn_momo.target_environment'),
+            'Authorization' => 'Basic ' . base64_encode("{$this->userId}:{$this->apiKey}"),
+        ])->post("{$this->baseUrl}/collection/v1_0/refund", [
+            'amount' => number_format($amount ?? $paiement->montant, 0, '', ''),
+            'currency' => $paiement->devise,
+            'externalId' => $paiement->reference_transaction,
+            'payerMessage' => $reason ?: 'Remboursement',
+            'payeeNote' => 'RestoApp',
+        ]);
+
+        if ($response->successful()) {
+            $paiement->update(['statut' => 'rembourse']);
+            return true;
+        }
+
+        return false;
+    }
+
+    public function handleWebhook(array $payload, array $headers = []): void
+    {
+        $referenceId = $payload['referenceId'] ?? null;
+        $status = $payload['status'] ?? null;
+        $amount = $payload['amount'] ?? null;
+
+        $paiement = Paiement::where('reference_prestataire', $referenceId)->first();
+        if (!$paiement) {
+            \Log::warning('Webhook MTN: paiement introuvable', $payload);
+            return;
+        }
+
+        match($status) {
+            'SUCCESSFUL' => $paiement->update([
+                'statut' => 'reussi',
+                'heure_paiement' => now(),
+            ]),
+            'FAILED' => $paiement->update(['statut' => 'echoue']),
+            default => null,
+        };
+
+        if ($status === 'SUCCESSFUL') {
+            $paiement->commande->changerStatut(\App\Enums\StatutCommande::CONFIRMEE);
+        }
+    }
+
+    public function verifyWebhookSignature(array $payload, array $headers): bool
+    {
+        // MTN MoMo n'a pas de signature HMAC standard, on vérifie via l'IP source
+        $allowedIps = config('services.mtn_momo.webhook_ips', []);
+        if (empty($allowedIps)) return true;
+
+        return in_array(request()->ip(), $allowedIps);
+    }
+
+    private function normaliserTelephone(string $telephone): string
+    {
+        // Retirer tous les caractères non numériques
+        $numero = preg_replace('/[^0-9]/', '', $telephone);
+        
+        // Si commence par 00, remplacer par +
+        if (str_starts_with($numero, '00')) {
+            $numero = substr($numero, 2);
+        }
+        
+        // Si commence par +, retirer le +
+        $numero = ltrim($numero, '+');
+        
+        // Si commence par 225 (Côte d'Ivoire), garder
+        if (str_starts_with($numero, '225')) {
+            return substr($numero, 3);
+        }
+        
+        return $numero;
+    }
+}
+```
+
+### 3.5 `app/Services/Payment/Gateways/WaveGateway.php`
+
+```php
+<?php
+
+namespace App\Services\Payment\Gateways;
+
+use App\Models\Commande;
+use App\Models\Paiement;
+use App\Services\Payment\Contracts\PaymentGatewayInterface;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
+
+class WaveGateway implements PaymentGatewayInterface
+{
+    private string $baseUrl;
+    private string $apiKey;
+
+    public function __construct()
+    {
+        $this->baseUrl = config('services.wave.base_url');
+        $this->apiKey = config('services.wave.api_key');
+    }
+
+    public function getName(): string
+    {
+        return 'wave';
+    }
+
+    public function initiate(Commande $commande, array $options = []): array
+    {
+        $telephone = $options['telephone_mobile_money'] ?? $commande->client->utilisateur->telephone;
+
+        $response = Http::withHeaders([
+            'Authorization' => "Bearer {$this->apiKey}",
+            'Content-Type' => 'application/json',
+        ])->post("{$this->baseUrl}/v1/transactions", [
+            'amount' => (int) round($commande->montant_total),
+            'currency' => $commande->restaurant->devise ?? 'XOF',
+            'purpose' => "Commande #{$commande->numero}",
+            'phone_number' => $telephone,
+            'merchant_reference' => $commande->numero,
+            'notification_url' => route('api.v1.webhooks.wave'),
+        ]);
+
+        $paiement = Paiement::create([
+            'commande_id' => $commande->id,
+            'client_id' => $commande->client_id,
+            'reference_transaction' => 'PAY-WAVE-' . strtoupper(Str::random(12)),
+            'reference_prestataire' => $response->json('id') ?? null,
+            'methode_paiement' => 'wave',
+            'prestataire' => 'wave',
+            'montant' => $commande->montant_total,
+            'devise' => $commande->restaurant->devise ?? 'XOF',
+            'telephone_mobile_money' => $telephone,
+            'statut' => 'en_attente',
+        ]);
+
+        return [
+            'paiement_id' => $paiement->id,
+            'transaction_id' => $response->json('id'),
+            'payment_link' => $response->json('payment_link'), // Lien pour le client
+            'status' => $response->json('status'),
+        ];
+    }
+
+    public function checkStatus(Paiement $paiement): string
+    {
+        $response = Http::withHeaders([
+            'Authorization' => "Bearer {$this->apiKey}",
+        ])->get("{$this->baseUrl}/v1/transactions/{$paiement->reference_prestataire}");
+
+        if ($response->failed()) return 'en_attente';
+
+        return match($response->json('status')) {
+            'successful' => 'reussi',
+            'failed' => 'echoue',
+            'cancelled' => 'annule',
+            default => 'en_attente',
+        };
+    }
+
+    public function refund(Paiement $paiement, float $amount = null, string $reason = ''): bool
+    {
+        $response = Http::withHeaders([
+            'Authorization' => "Bearer {$this->apiKey}",
+        ])->post("{$this->baseUrl}/v1/refunds", [
+            'transaction_id' => $paiement->reference_prestataire,
+            'amount' => (int) round($amount ?? $paiement->montant),
+            'reason' => $reason ?: 'Remboursement',
+        ]);
+
+        if ($response->successful()) {
+            $paiement->update(['statut' => 'rembourse']);
+            return true;
+        }
+
+        return false;
+    }
+
+    public function handleWebhook(array $payload, array $headers = []): void
+    {
+        $transactionId = $payload['transaction_id'] ?? null;
+        $status = $payload['status'] ?? null;
+
+        $paiement = Paiement::where('reference_prestataire', $transactionId)->first();
+        if (!$paiement) return;
+
+        match($status) {
+            'successful' => $paiement->update([
+                'statut' => 'reussi',
+                'heure_paiement' => now(),
+            ]),
+            'failed', 'cancelled' => $paiement->update(['statut' => 'echoue']),
+            default => null,
+        };
+
+        if ($status === 'successful') {
+            $paiement->commande->changerStatut(\App\Enums\StatutCommande::CONFIRMEE);
+        }
+    }
+
+    public function verifyWebhookSignature(array $payload, array $headers): bool
+    {
+        $signature = $headers['Wave-Signature'] ?? '';
+        $computed = hash_hmac('sha256', json_encode($payload), config('services.wave.webhook_secret'));
+        return hash_equals($computed, $signature);
+    }
+}
+```
+
+### 3.6 `app/Services/Payment/Gateways/PayPalGateway.php`
+
+```php
+<?php
+
+namespace App\Services\Payment\Gateways;
+
+use App\Models\Commande;
+use App\Models\Paiement;
+use App\Services\Payment\Contracts\PaymentGatewayInterface;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
+
+class PayPalGateway implements PaymentGatewayInterface
+{
+    private string $baseUrl;
+    private ?string $accessToken = null;
+
+    public function __construct()
+    {
+        $mode = config('services.paypal.mode', 'sandbox');
+        $this->baseUrl = $mode === 'live' 
+            ? 'https://api-m.paypal.com' 
+            : 'https://api-m.sandbox.paypal.com';
+    }
+
+    public function getName(): string
+    {
+        return 'paypal';
+    }
+
+    private function getAccessToken(): string
+    {
+        if ($this->accessToken) return $this->accessToken;
+
+        $response = Http::withBasicAuth(
+            config('services.paypal.client_id'),
+            config('services.paypal.secret')
+        )->asForm()->post("{$this->baseUrl}/v1/oauth2/token", [
+            'grant_type' => 'client_credentials',
+        ]);
+
+        $this->accessToken = $response->json('access_token');
+        return $this->accessToken;
+    }
+
+    public function initiate(Commande $commande, array $options = []): array
+    {
+        $response = Http::withToken($this->getAccessToken())
+            ->withHeaders(['PayPal-Request-Id' => Str::uuid()->toString()])
+            ->post("{$this->baseUrl}/v2/checkout/orders", [
+                'intent' => 'CAPTURE',
+                'purchase_units' => [[
+                    'reference_id' => $commande->numero,
+                    'description' => "Commande #{$commande->numero}",
+                    'amount' => [
+                        'currency_code' => 'USD',
+                        'value' => number_format($commande->montant_total / 600, 2, '.', ''), // Conversion XOF → USD approximative
+                    ],
+                ]],
+                'application_context' => [
+                    'return_url' => route('client.commandes.show', $commande) . '?paypal=success',
+                    'cancel_url' => route('client.commandes.show', $commande) . '?paypal=cancel',
+                    'brand_name' => 'RestoApp',
+                    'user_action' => 'PAY_NOW',
+                ],
+            ]);
+
+        $orderData = $response->json();
+        $approvalLink = collect($orderData['links'] ?? [])
+            ->firstWhere('rel', 'approve')['href'] ?? null;
+
+        $paiement = Paiement::create([
+            'commande_id' => $commande->id,
+            'client_id' => $commande->client_id,
+            'reference_transaction' => 'PAY-PAYPAL-' . strtoupper(Str::random(12)),
+            'reference_prestataire' => $orderData['id'] ?? null,
+            'methode_paiement' => 'paypal',
+            'prestataire' => 'paypal',
+            'montant' => $commande->montant_total,
+            'devise' => 'USD',
+            'email_paypal' => $options['email_paypal'] ?? null,
+            'statut' => 'en_attente',
+            'metadata' => ['approval_link' => $approvalLink],
+        ]);
+
+        return [
+            'paiement_id' => $paiement->id,
+            'order_id' => $orderData['id'],
+            'approval_link' => $approvalLink,
+        ];
+    }
+
+    public function checkStatus(Paiement $paiement): string
+    {
+        $response = Http::withToken($this->getAccessToken())
+            ->get("{$this->baseUrl}/v2/checkout/orders/{$paiement->reference_prestataire}");
+
+        if ($response->failed()) return 'en_attente';
+
+        return match($response->json('status')) {
+            'COMPLETED' => 'reussi',
+            'VOIDED', 'DECLINED' => 'echoue',
+            'CREATED', 'SAVED', 'PAYER_ACTION_REQUIRED' => 'en_attente',
+            default => 'en_attente',
+        };
+    }
+
+    public function refund(Paiement $paiement, float $amount = null, string $reason = ''): bool
+    {
+        // Récupérer le capture_id
+        $order = Http::withToken($this->getAccessToken())
+            ->get("{$this->baseUrl}/v2/checkout/orders/{$paiement->reference_prestataire}")
+            ->json();
+        
+        $captureId = $order['purchase_units'][0]['payments']['captures'][0]['id'] ?? null;
+        if (!$captureId) return false;
+
+        $data = [];
+        if ($amount) {
+            $data['amount'] = [
+                'value' => number_format($amount / 600, 2, '.', ''),
+                'currency_code' => 'USD',
+            ];
+        }
+
+        $response = Http::withToken($this->getAccessToken())
+            ->post("{$this->baseUrl}/v2/payments/captures/{$captureId}/refund", $data);
+
+        if ($response->successful()) {
+            $paiement->update(['statut' => $amount && $amount < $paiement->montant ? 'rembourse_partiellement' : 'rembourse']);
+            return true;
+        }
+
+        return false;
+    }
+
+    public function handleWebhook(array $payload, array $headers = []): void
+    {
+        $eventType = $payload['event_type'] ?? null;
+        $resource = $payload['resource'] ?? [];
+
+        match($eventType) {
+            'CHECKOUT.ORDER.APPROVED' => $this->captureOrder($resource['id']),
+            'PAYMENT.CAPTURE.COMPLETED' => $this->onCaptureCompleted($resource),
+            'PAYMENT.CAPTURE.REFUNDED' => $this->onRefunded($resource),
+            default => null,
+        };
+    }
+
+    public function verifyWebhookSignature(array $payload, array $headers): bool
+    {
+        $response = Http::withToken($this->getAccessToken())
+            ->post("{$this->baseUrl}/v1/notifications/verify-webhook-signature", [
+                'auth_algo' => $headers['PAYPAL-AUTH-ALGO'] ?? '',
+                'cert_url' => $headers['PAYPAL-CERT-URL'] ?? '',
+                'transmission_id' => $headers['PAYPAL-TRANSMISSION-ID'] ?? '',
+                'transmission_sig' => $headers['PAYPAL-TRANSMISSION-SIG'] ?? '',
+                'transmission_time' => $headers['PAYPAL-TRANSMISSION-TIME'] ?? '',
+                'webhook_id' => config('services.paypal.webhook_id'),
+                'webhook_event' => $payload,
+            ]);
+
+        return $response->json('verification_status') === 'SUCCESS';
+    }
+
+    private function captureOrder(string $orderId): void
+    {
+        Http::withToken($this->getAccessToken())
+            ->post("{$this->baseUrl}/v2/checkout/orders/{$orderId}/capture");
+    }
+
+    private function onCaptureCompleted(array $resource): void
+    {
+        $orderId = $resource['supplementary_data']['related_ids']['order_id'] ?? null;
+        $paiement = Paiement::where('reference_prestataire', $orderId)->first();
+        
+        if ($paiement) {
+            $paiement->update(['statut' => 'reussi', 'heure_paiement' => now()]);
+            $paiement->commande->changerStatut(\App\Enums\StatutCommande::CONFIRMEE);
+        }
+    }
+
+    private function onRefunded(array $resource): void
+    {
+        // Logique de gestion du remboursement
+    }
+}
+```
+
+### 3.7 Gateways simplifiés pour Moov, Orange, Payeer, Payoneer
+
+```php
+<?php
+// app/Services/Payment/Gateways/MoovMoneyGateway.php
+namespace App\Services\Payment\Gateways;
+
+use App\Models\Commande;
+use App\Models\Paiement;
+use App\Services\Payment\Contracts\PaymentGatewayInterface;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
+
+class MoovMoneyGateway implements PaymentGatewayInterface
+{
+    public function getName(): string { return 'moov'; }
+
+    public function initiate(Commande $commande, array $options = []): array
+    {
+        $telephone = $options['telephone_mobile_money'] ?? $commande->client->utilisateur->telephone;
+        
+        $response = Http::withHeaders([
+            'Authorization' => 'Bearer ' . $this->getToken(),
+        ])->post(config('services.moov_money.base_url') . '/api/v1/collection', [
+            'merchant_id' => config('services.moov_money.merchant_id'),
+            'amount' => (int) $commande->montant_total,
+            'currency' => $commande->restaurant->devise ?? 'XOF',
+            'customer_msisdn' => $telephone,
+            'reference' => $commande->numero,
+            'callback_url' => route('api.v1.webhooks.moov'),
+        ]);
+
+        $paiement = Paiement::create([
+            'commande_id' => $commande->id,
+            'client_id' => $commande->client_id,
+            'reference_transaction' => 'PAY-MOOV-' . strtoupper(Str::random(12)),
+            'reference_prestataire' => $response->json('transaction_id'),
+            'methode_paiement' => 'moov_money',
+            'prestataire' => 'moov',
+            'montant' => $commande->montant_total,
+            'devise' => $commande->restaurant->devise ?? 'XOF',
+            'telephone_mobile_money' => $telephone,
+            'statut' => 'en_attente',
+        ]);
+
+        return [
+            'paiement_id' => $paiement->id,
+            'transaction_id' => $response->json('transaction_id'),
+            'ussd_code' => $response->json('ussd_code'), // Code à composer par le client
+        ];
+    }
+
+    public function checkStatus(Paiement $paiement): string
+    {
+        $response = Http::withHeaders([
+            'Authorization' => 'Bearer ' . $this->getToken(),
+        ])->get(config('services.moov_money.base_url') . "/api/v1/transactions/{$paiement->reference_prestataire}");
+
+        return match($response->json('status')) {
+            'success' => 'reussi',
+            'failed' => 'echoue',
+            default => 'en_attente',
+        };
+    }
+
+    public function refund(Paiement $paiement, float $amount = null, string $reason = ''): bool
+    {
+        $response = Http::withHeaders([
+            'Authorization' => 'Bearer ' . $this->getToken(),
+        ])->post(config('services.moov_money.base_url') . '/api/v1/refund', [
+            'transaction_id' => $paiement->reference_prestataire,
+            'amount' => (int) ($amount ?? $paiement->montant),
+        ]);
+
+        if ($response->successful()) {
+            $paiement->update(['statut' => 'rembourse']);
+            return true;
+        }
+        return false;
+    }
+
+    public function handleWebhook(array $payload, array $headers = []): void
+    {
+        $paiement = Paiement::where('reference_prestataire', $payload['transaction_id'] ?? '')->first();
+        if (!$paiement) return;
+
+        if (($payload['status'] ?? '') === 'success') {
+            $paiement->update(['statut' => 'reussi', 'heure_paiement' => now()]);
+            $paiement->commande->changerStatut(\App\Enums\StatutCommande::CONFIRMEE);
+        }
+    }
+
+    public function verifyWebhookSignature(array $payload, array $headers): bool
+    {
+        $signature = $headers['X-Moov-Signature'] ?? '';
+        $computed = hash_hmac('sha256', json_encode($payload), config('services.moov_money.api_secret'));
+        return hash_equals($computed, $signature);
+    }
+
+    private function getToken(): string
+    {
+        $response = Http::asForm()->post(config('services.moov_money.base_url') . '/oauth/token', [
+            'grant_type' => 'client_credentials',
+            'client_id' => config('services.moov_money.merchant_id'),
+            'client_secret' => config('services.moov_money.api_secret'),
+        ]);
+        return $response->json('access_token');
+    }
+}
+```
+
+*(Les gateways OrangeMoney, Payeer et Payoneer suivent la même structure - je les mets en version condensée)*
+
+```php
+<?php
+// app/Services/Payment/Gateways/OrangeMoneyGateway.php
+namespace App\Services\Payment\Gateways;
+
+use App\Models\{Commande, Paiement};
+use App\Services\Payment\Contracts\PaymentGatewayInterface;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
+
+class OrangeMoneyGateway implements PaymentGatewayInterface
+{
+    public function getName(): string { return 'orange_money'; }
+
+    public function initiate(Commande $commande, array $options = []): array
+    {
+        $telephone = $options['telephone_mobile_money'] ?? $commande->client->utilisateur->telephone;
+        
+        $response = Http::withHeaders([
+            'Authorization' => 'Bearer ' . $this->getToken(),
+        ])->post(config('services.orange_money.base_url') . '/partner/v1/transactions/web', [
+            'merchant_key' => config('services.orange_money.merchant_key'),
+            'currency' => $commande->restaurant->devise ?? 'XOF',
+            'amount' => (int) $commande->montant_total,
+            'reference' => $commande->numero,
+            'return_url' => route('client.commandes.show', $commande),
+            'notif_url' => route('api.v1.webhooks.orange-money'),
+            'customer_msisdn' => $telephone,
+        ]);
+
+        $paiement = Paiement::create([
+            'commande_id' => $commande->id,
+            'client_id' => $commande->client_id,
+            'reference_transaction' => 'PAY-OM-' . strtoupper(Str::random(12)),
+            'reference_prestataire' => $response->json('trans_id'),
+            'methode_paiement' => 'orange_money',
+            'prestataire' => 'orange_money',
+            'montant' => $commande->montant_total,
+            'devise' => $commande->restaurant->devise ?? 'XOF',
+            'telephone_mobile_money' => $telephone,
+            'statut' => 'en_attente',
+        ]);
+
+        return [
+            'paiement_id' => $paiement->id,
+            'redirect_url' => $response->json('redirect_url'),
+            'trans_id' => $response->json('trans_id'),
+        ];
+    }
+
+    public function checkStatus(Paiement $paiement): string
+    {
+        $response = Http::withHeaders([
+            'Authorization' => 'Bearer ' . $this->getToken(),
+        ])->post(config('services.orange_money.base_url') . '/partner/v3/transactions/status', [
+            'merchant_key' => config('services.orange_money.merchant_key'),
+            'trans_id' => $paiement->reference_prestataire,
+        ]);
+
+        return match($response->json('status')) {
+            'SUCCESS' => 'reussi',
+            'FAILED' => 'echoue',
+            default => 'en_attente',
+        };
+    }
+
+    public function refund(Paiement $paiement, float $amount = null, string $reason = ''): bool
+    {
+        // Orange Money ne supporte pas le remboursement automatique via API dans tous les pays
+        \Log::warning('Remboursement Orange Money à traiter manuellement', ['paiement_id' => $paiement->id]);
+        return false;
+    }
+
+    public function handleWebhook(array $payload, array $headers = []): void
+    {
+        $paiement = Paiement::where('reference_prestataire', $payload['trans_id'] ?? '')->first();
+        if (!$paiement) return;
+
+        if (($payload['status'] ?? '') === 'SUCCESS') {
+            $paiement->update(['statut' => 'reussi', 'heure_paiement' => now()]);
+            $paiement->commande->changerStatut(\App\Enums\StatutCommande::CONFIRMEE);
+        }
+    }
+
+    public function verifyWebhookSignature(array $payload, array $headers): bool
+    {
+        return true; // Orange Money ne fournit pas de signature HMAC standard
+    }
+
+    private function getToken(): string
+    {
+        $response = Http::asForm()->post(config('services.orange_money.base_url') . '/oauth/v3/oauth/token', [
+            'grant_type' => 'client_credentials',
+            'Authorization' => 'Basic ' . base64_encode(config('services.orange_money.merchant_key') . ':' . config('services.orange_money.api_key')),
+        ]);
+        return $response->json('access_token');
+    }
+}
+```
+
+```php
+<?php
+// app/Services/Payment/Gateways/PayeerGateway.php
+namespace App\Services\Payment\Gateways;
+
+use App\Models\{Commande, Paiement};
+use App\Services\Payment\Contracts\PaymentGatewayInterface;
+use Illuminate\Support\Str;
+
+class PayeerGateway implements PaymentGatewayInterface
+{
+    public function getName(): string { return 'payeer'; }
+
+    public function initiate(Commande $commande, array $options = []): array
+    {
+        $m_shop = config('services.payeer.merchant_id');
+        $m_orderid = $commande->numero;
+        $m_amount = number_format($commande->montant_total / 600, 2, '.', ''); // Conversion approximative
+        $m_curr = 'USD';
+        $m_desc = base64_encode("Commande #{$commande->numero}");
+        
+        $key = config('services.payeer.secret_key');
+        $sign = hash('sha256', implode(':', [$m_shop, $m_orderid, $m_amount, $m_curr, $key]));
+
+        $paymentUrl = config('services.payeer.base_url') . '/en/merchant/merchantpay?' . http_build_query([
+            'm_shop' => $m_shop,
+            'm_orderid' => $m_orderid,
+            'm_amount' => $m_amount,
+            'm_curr' => $m_curr,
+            'm_desc' => $m_desc,
+            'm_sign' => strtoupper($sign),
+        ]);
+
+        $paiement = Paiement::create([
+            'commande_id' => $commande->id,
+            'client_id' => $commande->client_id,
+            'reference_transaction' => 'PAY-PAYEER-' . strtoupper(Str::random(12)),
+            'reference_prestataire' => $m_orderid,
+            'methode_paiement' => 'payeer',
+            'prestataire' => 'payeer',
+            'montant' => $commande->montant_total,
+            'devise' => 'USD',
+            'statut' => 'en_attente',
+            'metadata' => ['payment_url' => $paymentUrl],
+        ]);
+
+        return [
+            'paiement_id' => $paiement->id,
+            'payment_url' => $paymentUrl,
+        ];
+    }
+
+    public function checkStatus(Paiement $paiement): string { return $paiement->statut; }
+
+    public function refund(Paiement $paiement, float $amount = null, string $reason = ''): bool
+    {
+        return false; // Payeer ne supporte pas les remboursements API
+    }
+
+    public function handleWebhook(array $payload, array $headers = []): void
+    {
+        // Payeer envoie les confirmations via un script de retour (return_url)
+        // Pas de webhook push standard
+    }
+
+    public function verifyWebhookSignature(array $payload, array $headers): bool
+    {
+        $sign = strtoupper($payload['sign'] ?? '');
+        $computed = strtoupper(hash('sha256', implode(':', [
+            config('services.payeer.merchant_id'),
+            $payload['m_orderid'] ?? '',
+            $payload['m_amount'] ?? '',
+            $payload['m_curr'] ?? '',
+            config('services.payeer.secret_key'),
+        ])));
+        return hash_equals($computed, $sign);
+    }
+}
+```
+
+```php
+<?php
+// app/Services/Payment/Gateways/PayoneerGateway.php
+namespace App\Services\Payment\Gateways;
+
+use App\Models\{Commande, Paiement};
+use App\Services\Payment\Contracts\PaymentGatewayInterface;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
+
+class PayoneerGateway implements PaymentGatewayInterface
+{
+    private ?string $sessionToken = null;
+
+    public function getName(): string { return 'payoneer'; }
+
+    public function initiate(Commande $commande, array $options = []): array
+    {
+        // Payoneer Checkout nécessite une intégration via leur widget JS
+        // On crée juste un enregistrement pour suivre
+        $paiement = Paiement::create([
+            'commande_id' => $commande->id,
+            'client_id' => $commande->client_id,
+            'reference_transaction' => 'PAY-PAYONEER-' . strtoupper(Str::random(12)),
+            'methode_paiement' => 'payoneer',
+            'prestataire' => 'payoneer',
+            'montant' => $commande->montant_total,
+            'devise' => 'USD',
+            'statut' => 'en_attente',
+            'metadata' => [
+                'checkout_id' => 'CHK-' . strtoupper(Str::random(12)),
+            ],
+        ]);
+
+        return [
+            'paiement_id' => $paiement->id,
+            'checkout_id' => $paiement->metadata['checkout_id'],
+            'instructions' => 'Le widget Payoneer sera affiché au frontend',
+        ];
+    }
+
+    public function checkStatus(Paiement $paiement): string { return $paiement->statut; }
+
+    public function refund(Paiement $paiement, float $amount = null, string $reason = ''): bool
+    {
+        return false;
+    }
+
+    public function handleWebhook(array $payload, array $headers = []): void
+    {
+        $eventType = $payload['event_type'] ?? null;
+        $checkoutId = $payload['checkout_id'] ?? null;
+
+        $paiement = Paiement::where('metadata->checkout_id', $checkoutId)->first();
+        if (!$paiement) return;
+
+        if ($eventType === 'PAYMENT_SUCCESS') {
+            $paiement->update(['statut' => 'reussi', 'heure_paiement' => now()]);
+            $paiement->commande->changerStatut(\App\Enums\StatutCommande::CONFIRMEE);
+        }
+    }
+
+    public function verifyWebhookSignature(array $payload, array $headers): bool
+    {
+        $signature = $headers['X-Payoneer-Signature'] ?? '';
+        $computed = hash_hmac('sha256', json_encode($payload), config('services.payoneer.partner_api_key'));
+        return hash_equals($computed, $signature);
+    }
+}
+```
+
+---
+
+## 📱 4. MODULE SMS
+
+### 4.1 `app/Services/Sms/SmsSenderInterface.php`
+
+```php
+<?php
+
+namespace App\Services\Sms;
+
+interface SmsSenderInterface
+{
+    public function send(string $to, string $message): bool;
+    public function sendOtp(string $to, string $otp): bool;
+}
+```
+
+### 4.2 `app/Services/Sms/TwilioSmsSender.php`
+
+```php
+<?php
+
+namespace App\Services\Sms;
+
+use Twilio\Rest\Client;
+
+class TwilioSmsSender implements SmsSenderInterface
+{
+    private Client $client;
+    private string $from;
+
+    public function __construct()
+    {
+        $this->client = new Client(
+            config('services.twilio.sid'),
+            config('services.twilio.token')
+        );
+        $this->from = config('services.twilio.from');
+    }
+
+    public function send(string $to, string $message): bool
+    {
+        try {
+            $this->client->messages->create($to, [
+                'from' => $this->from,
+                'body' => $message,
+            ]);
+            \Log::info("SMS envoyé via Twilio à {$to}");
+            return true;
+        } catch (\Exception $e) {
+            \Log::error('Erreur Twilio', ['error' => $e->getMessage(), 'to' => $to]);
+            return false;
+        }
+    }
+
+    public function sendOtp(string $to, string $otp): bool
+    {
+        return $this->send($to, "Votre code RestoApp : {$otp}. Valide 10 minutes. Ne le partagez à personne.");
+    }
+}
+```
+
+### 4.3 `app/Services/Sms/OrangeSmsSender.php`
+
+```php
+<?php
+
+namespace App\Services\Sms;
+
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Cache;
+
+class OrangeSmsSender implements SmsSenderInterface
+{
+    public function send(string $to, string $message): bool
+    {
+        try {
+            $token = $this->getAccessToken();
+            
+            $response = Http::withHeaders([
+                'Authorization' => "Bearer {$token}",
+                'Content-Type' => 'application/json',
+            ])->post('https://api.orange.com/sms/send/v1/outboundSms', [
+                'outboundSMSMessageRequest' => [
+                    'address' => "tel:{$to}",
+                    'senderAddress' => 'tel:' . config('services.orange_sms.sender_name'),
+                    'outboundSMSTextMessage' => ['message' => $message],
+                ],
+            ]);
+
+            return $response->successful();
+        } catch (\Exception $e) {
+            \Log::error('Erreur Orange SMS', ['error' => $e->getMessage()]);
+            return false;
+        }
+    }
+
+    public function sendOtp(string $to, string $otp): bool
+    {
+        return $this->send($to, "Votre code RestoApp : {$otp}. Valide 10 minutes.");
+    }
+
+    private function getAccessToken(): string
+    {
+        return Cache::remember('orange_sms_token', 3500, function () {
+            $response = Http::withBasicAuth(
+                config('services.orange_sms.client_id'),
+                config('services.orange_sms.client_secret')
+            ])->asForm()->post('https://api.orange.com/oauth/v3/token', [
+                'grant_type' => 'client_credentials',
+            ]);
+            return $response->json('access_token');
+        });
+    }
+}
+```
+
+### 4.4 `app/Services/Sms/SmsFactory.php`
+
+```php
+<?php
+
+namespace App\Services\Sms;
+
+class SmsFactory
+{
+    public static function create(): SmsSenderInterface
+    {
+        $driver = config('sms.driver', 'twilio');
+        
+        return match($driver) {
+            'twilio' => new TwilioSmsSender(),
+            'orange' => new OrangeSmsSender(),
+            default => throw new \InvalidArgumentException("Driver SMS inconnu: {$driver}"),
+        };
+    }
+}
+```
+
+---
+
+## 📧 5. MODULE EMAIL (Brevo/Sendinblue)
+
+### 5.1 `config/mail.php` (ajout du driver Brevo)
+
+```php
+'mailers' => [
+    // ...
+    'brevo' => [
+        'transport' => 'brevo',
+    ],
+],
+```
+
+### 5.2 `app/Services/Email/BrevoMailService.php` (pour envois transactionnels avancés)
+
+```php
+<?php
+
+namespace App\Services\Email;
+
+use Illuminate\Support\Facades\Http;
+
+class BrevoMailService
+{
+    private string $apiKey;
+    private string $baseUrl = 'https://api.brevo.com/v3';
+
+    public function __construct()
+    {
+        $this->apiKey = config('services.brevo.api_key');
+    }
+
+    /**
+     * Envoie un email via un template Brevo
+     */
+    public function sendTemplate(string $to, int $templateId, array $params = []): bool
+    {
+        $response = Http::withHeaders([
+            'api-key' => $this->apiKey,
+            'Content-Type' => 'application/json',
+            'Accept' => 'application/json',
+        ])->post("{$this->baseUrl}/smtp/email", [
+            'templateId' => $templateId,
+            'to' => [['email' => $to]],
+            'params' => $params,
+        ]);
+
+        return $response->successful();
+    }
+
+    /**
+     * Ajoute un contact à une liste Brevo
+     */
+    public function addContactToList(string $email, int $listId, array $attributes = []): bool
+    {
+        $response = Http::withHeaders([
+            'api-key' => $this->apiKey,
+        ])->post("{$this->baseUrl}/contacts", [
+            'email' => $email,
+            'listIds' => [$listId],
+            'attributes' => $attributes,
+            'updateEnabled' => true,
+        ]);
+
+        return $response->successful() || $response->status() === 204;
+    }
+
+    /**
+     * Envoie un email transactionnel classique
+     */
+    public function send(string $to, string $subject, string $htmlContent, ?string $from = null): bool
+    {
+        $response = Http::withHeaders([
+            'api-key' => $this->apiKey,
+        ])->post("{$this->baseUrl}/smtp/email", [
+            'sender' => ['name' => 'RestoApp', 'email' => $from ?? 'noreply@restoapp.com'],
+            'to' => [['email' => $to]],
+            'subject' => $subject,
+            'htmlContent' => $htmlContent,
+        ]);
+
+        return $response->successful();
+    }
+}
+```
+
+---
+
+## 🗺️ 6. MODULE GOOGLE MAPS
+
+### `app/Services/Maps/GoogleMapsService.php`
+
+```php
+<?php
+
+namespace App\Services\Maps;
+
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Cache;
+
+class GoogleMapsService
+{
+    private string $apiKey;
+    private string $baseUrl = 'https://maps.googleapis.com/maps/api';
+
+    public function __construct()
+    {
+        $this->apiKey = config('services.google.maps_api_key');
+    }
+
+    /**
+     * Autocomplétion d'adresse
+     */
+    public function autocomplete(string $input, ?string $language = 'fr'): array
+    {
+        $cacheKey = 'maps_autocomplete_' . md5($input . $language);
+        
+        return Cache::remember($cacheKey, 3600, function () use ($input, $language) {
+            $response = Http::get("{$this->baseUrl}/place/autocomplete/json", [
+                'input' => $input,
+                'language' => $language,
+                'key' => $this->apiKey,
+                'components' => 'country:ci', // Côte d'Ivoire par défaut
+            ]);
+
+            return $response->json('predictions', []);
+        });
+    }
+
+    /**
+     * Géocodage : adresse → coordonnées
+     */
+    public function geocode(string $address): ?array
+    {
+        $cacheKey = 'maps_geocode_' . md5($address);
+        
+        return Cache::remember($cacheKey, 86400, function () use ($address) {
+            $response = Http::get("{$this->baseUrl}/geocode/json", [
+                'address' => $address,
+                'key' => $this->apiKey,
+            ]);
+
+            $result = $response->json('results.0');
+            if (!$result) return null;
+
+            return [
+                'latitude' => $result['geometry']['location']['lat'],
+                'longitude' => $result['geometry']['location']['lng'],
+                'formatted_address' => $result['formatted_address'],
+            ];
+        });
+    }
+
+    /**
+     * Géocodage inverse : coordonnées → adresse
+     */
+    public function reverseGeocode(float $lat, float $lng): ?string
+    {
+        $response = Http::get("{$this->baseUrl}/geocode/json", [
+            'latlng' => "{$lat},{$lng}",
+            'key' => $this->apiKey,
+        ]);
+
+        return $response->json('results.0.formatted_address');
+    }
+
+    /**
+     * Calcul de distance et durée entre 2 points
+     */
+    public function calculateRoute(array $origin, array $destination, string $mode = 'driving'): ?array
+    {
+        $cacheKey = 'maps_route_' . md5(json_encode([$origin, $destination, $mode]));
+        
+        return Cache::remember($cacheKey, 1800, function () use ($origin, $destination, $mode) {
+            $response = Http::get("{$this->baseUrl}/directions/json", [
+                'origin' => "{$origin['lat']},{$origin['lng']}",
+                'destination' => "{$destination['lat']},{$destination['lng']}",
+                'mode' => $mode,
+                'key' => $this->apiKey,
+            ]);
+
+            $route = $response->json('routes.0.legs.0');
+            if (!$route) return null;
+
+            return [
+                'distance_km' => $route['distance']['value'] / 1000,
+                'distance_text' => $route['distance']['text'],
+                'duration_minutes' => (int) round($route['duration']['value'] / 60),
+                'duration_text' => $route['duration']['text'],
+            ];
+        });
+    }
+
+    /**
+     * Calcul des frais de livraison basé sur la distance
+     */
+    public function calculerFraisLivraison(array $origin, array $destination): float
+    {
+        $route = $this->calculateRoute($origin, $destination, 'driving');
+        
+        if (!$route) {
+            return 1500; // Frais par défaut
+        }
+
+        $distance = $route['distance_km'];
+
+        // Grille tarifaire progressive
+        if ($distance <= 2) return 1000;
+        if ($distance <= 5) return 1500;
+        if ($distance <= 10) return 2500;
+        if ($distance <= 15) return 3500;
+        return 5000;
+    }
+
+    /**
+     * Recherche de restaurants à proximité (via Google Places)
+     */
+    public function searchNearby(float $lat, float $lng, int $radius = 5000, string $keyword = 'restaurant'): array
+    {
+        $response = Http::get('https://maps.googleapis.com/maps/api/place/nearbysearch/json', [
+            'location' => "{$lat},{$lng}",
+            'radius' => $radius,
+            'keyword' => $keyword,
+            'key' => config('services.google.places_api_key'),
+        ]);
+
+        return $response->json('results', []);
+    }
+}
+```
+
+---
+
+## 🖼️ 7. MODULE CLOUDINARY (Images)
+
+### `app/Services/Storage/CloudinaryService.php`
+
+```php
+<?php
+
+namespace App\Services\Storage;
+
+use Cloudinary\Cloudinary;
+use Cloudinary\Configuration\Configuration;
+
+class CloudinaryService
+{
+    private Cloudinary $cloudinary;
+
+    public function __construct()
+    {
+        Configuration::instance([
+            'cloud' => ['cloud_name' => config('services.cloudinary.cloud_name')],
+            'url' => [
+                'api_key' => config('services.cloudinary.api_key'),
+                'api_secret' => config('services.cloudinary.api_secret'),
+            ],
+        ]);
+        $this->cloudinary = new Cloudinary();
+    }
+
+    /**
+     * Upload une image avec transformations automatiques
+     */
+    public function uploadImage($file, string $folder = 'restaurants', array $options = []): array
+    {
+        $result = $this->cloudinary->uploadApi()->upload($file->getRealPath(), array_merge([
+            'folder' => $folder,
+            'transformation' => [
+                'quality' => 'auto',
+                'fetch_format' => 'auto',
+                'width' => $options['width'] ?? 1200,
+                'height' => $options['height'] ?? 800,
+                'crop' => $options['crop'] ?? 'limit',
+            ],
+            'resource_type' => 'image',
+        ], $options));
+
+        return [
+            'public_id' => $result['public_id'],
+            'url' => $result['secure_url'],
+            'width' => $result['width'],
+            'height' => $result['height'],
+            'format' => $result['format'],
+            'bytes' => $result['bytes'],
+        ];
+    }
+
+    /**
+     * Upload une image de profil (carrée)
+     */
+    public function uploadAvatar($file, string $folder = 'avatars'): array
+    {
+        return $this->uploadImage($file, $folder, [
+            'width' => 400,
+            'height' => 400,
+            'crop' => 'fill',
+            'gravity' => 'face',
+        ]);
+    }
+
+    /**
+     * Upload une image de produit (format carte)
+     */
+    public function uploadProduitImage($file): array
+    {
+        return $this->uploadImage($file, 'produits', [
+            'width' => 800,
+            'height' => 600,
+            'crop' => 'fill',
+        ]);
+    }
+
+    /**
+     * Génère une URL avec transformations à la volée
+     */
+    public function getTransformedUrl(string $publicId, array $transformations = []): string
+    {
+        return $this->cloudinary->image()
+            ->media($publicId)
+            ->quality('auto')
+            ->format('auto')
+            ->toUrl();
+    }
+
+    /**
+     * Supprime une image
+     */
+    public function delete(string $publicId): bool
+    {
+        try {
+            $this->cloudinary->uploadApi()->destroy($publicId);
+            return true;
+        } catch (\Exception $e) {
+            \Log::error('Erreur suppression Cloudinary', ['error' => $e->getMessage()]);
+            return false;
+        }
+    }
+
+    /**
+     * Génère un thumbnail
+     */
+    public function getThumbnail(string $publicId, int $width = 200, int $height = 200): string
+    {
+        return $this->cloudinary->image()
+            ->media($publicId)
+            ->resize(\Cloudinary\Transformation\Resize::fill($width, $height))
+            ->quality('auto')
+            ->format('auto')
+            ->toUrl();
+    }
+}
+```
+
+---
+
+## 🔍 8. MODULE RECHERCHE (Meilisearch)
+
+### 8.1 `config/scout.php`
+
+```php
+<?php
+
+return [
+    'driver' => env('SCOUT_DRIVER', 'meilisearch'),
+    'prefix' => env('SCOUT_PREFIX', ''),
+    'queue' => env('SCOUT_QUEUE', true),
+    'after_commit' => false,
+    'chunkable.searchable' => [
+        'read_timeout' => 30,
+    ],
+    'meilisearch' => [
+        'host' => env('MEILISEARCH_HOST', 'http://localhost:7700'),
+        'key' => env('MEILISEARCH_KEY'),
+    ],
+];
+```
+
+### 8.2 `app/Services/Search/MeilisearchService.php`
+
+```php
+<?php
+
+namespace App\Services\Search;
+
+use App\Models\Produit;
+use App\Models\Restaurant;
+use Meilisearch\Client;
+
+class MeilisearchService
+{
+    private Client $client;
+
+    public function __construct()
+    {
+        $this->client = new Client(
+            config('scout.meilisearch.host'),
+            config('scout.meilisearch.key')
+        );
+    }
+
+    /**
+     * Recherche multi-critères (produits + restaurants)
+     */
+    public function search(string $query, array $options = []): array
+    {
+        $results = [
+            'restaurants' => [],
+            'produits' => [],
+        ];
+
+        // Recherche restaurants
+        $restaurantsIndex = $this->client->index('restaurants');
+        $restaurantsResults = $restaurantsIndex->search($query, [
+            'limit' => $options['limit'] ?? 10,
+            'filter' => $this->buildRestaurantFilters($options),
+        ]);
+        $results['restaurants'] = $restaurantsResults->getHits();
+
+        // Recherche produits
+        $produitsIndex = $this->client->index('produits');
+        $produitsResults = $produitsIndex->search($query, [
+            'limit' => $options['limit'] ?? 20,
+            'filter' => $this->buildProduitFilters($options),
+        ]);
+        $results['produits'] = $produitsResults->getHits();
+
+        return $results;
+    }
+
+    /**
+     * Recherche de produits avec filtres avancés
+     */
+    public function searchProduits(string $query, array $filters = []): array
+    {
+        $index = $this->client->index('produits');
+        
+        $searchFilters = [];
+        
+        if (!empty($filters['restaurant_id'])) {
+            $searchFilters[] = "restaurant_id = {$filters['restaurant_id']}";
+        }
+        if (!empty($filters['vegetarien'])) {
+            $searchFilters[] = 'est_vegetarien = true';
+        }
+        if (!empty($filters['vegan'])) {
+            $searchFilters[] = 'est_vegan = true';
+        }
+        if (!empty($filters['halal'])) {
+            $searchFilters[] = 'est_halal = true';
+        }
+        if (!empty($filters['sans_gluten'])) {
+            $searchFilters[] = 'est_sans_gluten = true';
+        }
+        if (!empty($filters['prix_min'])) {
+            $searchFilters[] = "prix_base >= {$filters['prix_min']}";
+        }
+        if (!empty($filters['prix_max'])) {
+            $searchFilters[] = "prix_base <= {$filters['prix_max']}";
+        }
+
+        $results = $index->search($query, [
+            'filter' => $searchFilters,
+            'limit' => $filters['limit'] ?? 50,
+            'sort' => $filters['sort'] ?? ['prix_base:asc'],
+        ]);
+
+        return $results->getHits();
+    }
+
+    /**
+     * Configure les indexes (à lancer une fois)
+     */
+    public function configureIndexes(): void
+    {
+        // Index restaurants
+        $restaurantsIndex = $this->client->index('restaurants');
+        $restaurantsIndex->updateFilterableAttributes([
+            'ville', 'statut', 'est_en_avant', 'livraison_activee',
+            'note', 'latitude', 'longitude',
+        ]);
+        $restaurantsIndex->updateSortableAttributes(['note', 'cree_le']);
+        $restaurantsIndex->updateSearchableAttributes([
+            'nom', 'description', 'ville', 'adresse',
+        ]);
+
+        // Index produits
+        $produitsIndex = $this->client->index('produits');
+        $produitsIndex->updateFilterableAttributes([
+            'restaurant_id', 'categorie_id', 'est_disponible',
+            'est_vegetarien', 'est_vegan', 'est_halal', 'est_sans_gluten', 'est_epice',
+            'prix_base', 'est_en_avant', 'est_nouveau',
+        ]);
+        $produitsIndex->updateSortableAttributes(['prix_base', 'ordre_tri', 'cree_le']);
+        $produitsIndex->updateSearchableAttributes([
+            'nom', 'description', 'tags',
+        ]);
+    }
+
+    private function buildRestaurantFilters(array $options): array
+    {
+        $filters = ['statut = actif'];
+        if (!empty($options['ville'])) {
+            $filters[] = "ville = '{$options['ville']}'";
+        }
+        if (!empty($options['livraison'])) {
+            $filters[] = 'livraison_activee = true';
+        }
+        if (!empty($options['note_min'])) {
+            $filters[] = "note >= {$options['note_min']}";
+        }
+        return $filters;
+    }
+
+    private function buildProduitFilters(array $options): array
+    {
+        $filters = ['est_disponible = true'];
+        if (!empty($options['restaurant_id'])) {
+            $filters[] = "restaurant_id = {$options['restaurant_id']}";
+        }
+        return $filters;
+    }
+}
+```
+
+---
+
+## 🌍 9. MODULE TRADUCTION (DeepL)
+
+### `app/Services/Translation/DeepLService.php`
+
+```php
+<?php
+
+namespace App\Services\Translation;
+
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Cache;
+
+class DeepLService
+{
+    private string $apiKey;
+    private string $baseUrl;
+
+    public function __construct()
+    {
+        $this->apiKey = config('services.deepl.api_key');
+        // DeepL a 2 URLs selon le type de clé (free ou pro)
+        $this->baseUrl = str_ends_with($this->apiKey, ':fx')
+            ? 'https://api-free.deepl.com/v2'
+            : 'https://api.deepl.com/v2';
+    }
+
+    /**
+     * Traduit un texte
+     */
+    public function translate(string $text, string $targetLang, ?string $sourceLang = null): string
+    {
+        $cacheKey = 'deepl_' . md5($text . $targetLang . $sourceLang);
+        
+        return Cache::remember($cacheKey, 86400 * 7, function () use ($text, $targetLang, $sourceLang) {
+            $params = [
+                'text' => [$text],
+                'target_lang' => strtoupper($targetLang),
+                'auth_key' => $this->apiKey,
+            ];
+
+            if ($sourceLang) {
+                $params['source_lang'] = strtoupper($sourceLang);
+            }
+
+            $response = Http::asForm()->post("{$this->baseUrl}/translate", $params);
+
+            if ($response->failed()) {
+                \Log::error('Erreur DeepL', ['response' => $response->body()]);
+                return $text;
+            }
+
+            return $response->json('translations.0.text') ?? $text;
+        });
+    }
+
+    /**
+     * Traduit un tableau JSON multi-langue
+     */
+    public function translateArray(array $data, string $sourceLang, array $targetLangs): array
+    {
+        $result = $data;
+        
+        foreach ($targetLangs as $targetLang) {
+            if (isset($result[$targetLang])) continue;
+            
+            $sourceText = $data[$sourceLang] ?? reset($data);
+            $result[$targetLang] = $this->translate($sourceText, $targetLang, $sourceLang);
+        }
+        
+        return $result;
+    }
+
+    /**
+     * Traduit automatiquement tous les champs traduisibles d'un modèle
+     */
+    public function translateModel($model, array $translatableFields, string $sourceLang = 'fr', array $targetLangs = ['en']): void
+    {
+        foreach ($translatableFields as $field) {
+            $currentValue = $model->getAttributes()[$field] ?? null;
+            if (!$currentValue) continue;
+
+            $data = is_string($currentValue) ? json_decode($currentValue, true) : $currentValue;
+            if (!is_array($data)) continue;
+
+            $translated = $this->translateArray($data, $sourceLang, $targetLangs);
+            $model->{$field} = $translated;
+        }
+
+        $model->save();
+    }
+
+    /**
+     * Vérifie les quotas DeepL
+     */
+    public function getUsage(): array
+    {
+        $response = Http::get("{$this->baseUrl}/usage", [
+            'auth_key' => $this->apiKey,
+        ]);
+
+        return $response->json();
+    }
+}
+```
+
+---
+
+## 🔔 10. MODULE NOTIFICATIONS PUSH (Firebase)
+
+### `app/Services/Notifications/FirebasePushService.php`
+
+```php
+<?php
+
+namespace App\Services\Notifications;
+
+use App\Models\TokenPush;
+use Kreait\Firebase\Factory;
+use Kreait\Firebase\Messaging\CloudMessage;
+use Kreait\Firebase\Messaging\Notification;
+
+class FirebasePushService
+{
+    private $messaging;
+
+    public function __construct()
+    {
+        $factory = (new Factory())->withServiceAccount(storage_path('app/firebase-credentials.json'));
+        $this->messaging = $factory->createMessaging();
+    }
+
+    /**
+     * Envoie une notification push à un utilisateur
+     */
+    public function sendToUser(string $userId, string $title, string $body, array $data = []): bool
+    {
+        $tokens = TokenPush::where('utilisateur_id', $userId)
+            ->actifs()
+            ->pluck('token')
+            ->toArray();
+
+        if (empty($tokens)) return false;
+
+        return $this->sendToTokens($tokens, $title, $body, $data);
+    }
+
+    /**
+     * Envoie à plusieurs tokens
+     */
+    public function sendToTokens(array $tokens, string $title, string $body, array $data = []): bool
+    {
+        try {
+            $notification = Notification::fromArray([
+                'title' => $title,
+                'body' => $body,
+            ]);
+
+            $message = CloudMessage::new()
+                ->withNotification($notification)
+                ->withData($data);
+
+            $report = $this->messaging->sendMulticast($message, $tokens);
+
+            // Désactiver les tokens invalides
+            foreach ($report->failures()->getItems() as $failure) {
+                if (in_array($failure->error()['code'] ?? '', [
+                    'UNREGISTERED', 'INVALID_ARGUMENT'
+                ])) {
+                    TokenPush::where('token', $failure->target())->update(['est_actif' => false]);
+                }
+            }
+
+            return $report->hasFailures() === false;
+        } catch (\Exception $e) {
+            \Log::error('Erreur Firebase Push', ['error' => $e->getMessage()]);
+            return false;
+        }
+    }
+
+    /**
+     * Envoie à un topic (ex: tous les clients d'un restaurant)
+     */
+    public function sendToTopic(string $topic, string $title, string $body, array $data = []): bool
+    {
+        try {
+            $message = CloudMessage::withTarget('topic', $topic)
+                ->withNotification(Notification::create($title, $body))
+                ->withData($data);
+
+            $this->messaging->send($message);
+            return true;
+        } catch (\Exception $e) {
+            \Log::error('Erreur Firebase Topic', ['error' => $e->getMessage()]);
+            return false;
+        }
+    }
+}
+```
+
+---
+
+## 🎣 11. CONTRÔLEUR WEBHOOKS UNIFIÉ
+
+### `app/Http/Controllers/Api/V1/WebhookController.php`
+
+```php
+<?php
+
+namespace App\Http\Controllers\Api\V1;
+
+use App\Http\Controllers\Controller;
+use App\Enums\MethodePaiement;
+use App\Services\Payment\PaymentGatewayFactory;
+use Illuminate\Http\Request;
+
+class WebhookController extends Controller
+{
+    /**
+     * Webhook Stripe
+     */
+    public function stripe(Request $request)
+    {
+        $payload = $request->json()->all();
+        $headers = $request->headers->all();
+        $headers = array_map(fn($v) => $v[0] ?? '', $headers);
+
+        $gateway = PaymentGatewayFactory::create(MethodePaiement::CARTE_BANCAIRE);
+
+        if (!$gateway->verifyWebhookSignature($payload, $headers)) {
+            return response()->json(['error' => 'Invalid signature'], 401);
+        }
+
+        $gateway->handleWebhook($payload, $headers);
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Webhook MTN
+     */
+    public function mtn(Request $request)
+    {
+        $payload = $request->json()->all();
+        $headers = $request->headers->all();
+        $headers = array_map(fn($v) => $v[0] ?? '', $headers);
+
+        $gateway = PaymentGatewayFactory::create(MethodePaiement::MTN_MOBILE_MONEY);
+
+        if (!$gateway->verifyWebhookSignature($payload, $headers)) {
+            return response()->json(['error' => 'Invalid signature'], 401);
+        }
+
+        $gateway->handleWebhook($payload, $headers);
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Webhook Moov
+     */
+    public function moov(Request $request)
+    {
+        $payload = $request->json()->all();
+        $headers = $request->headers->all();
+        $headers = array_map(fn($v) => $v[0] ?? '', $headers);
+
+        $gateway = PaymentGatewayFactory::create(MethodePaiement::MOOV_MONEY);
+
+        if (!$gateway->verifyWebhookSignature($payload, $headers)) {
+            return response()->json(['error' => 'Invalid signature'], 401);
+        }
+
+        $gateway->handleWebhook($payload, $headers);
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Webhook Orange Money
+     */
+    public function orangeMoney(Request $request)
+    {
+        $payload = $request->json()->all();
+        $headers = $request->headers->all();
+        $headers = array_map(fn($v) => $v[0] ?? '', $headers);
+
+        $gateway = PaymentGatewayFactory::create(MethodePaiement::ORANGE_MONEY);
+        $gateway->handleWebhook($payload, $headers);
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Webhook Wave
+     */
+    public function wave(Request $request)
+    {
+        $payload = $request->json()->all();
+        $headers = $request->headers->all();
+        $headers = array_map(fn($v) => $v[0] ?? '', $headers);
+
+        $gateway = PaymentGatewayFactory::create(MethodePaiement::WAVE);
+
+        if (!$gateway->verifyWebhookSignature($payload, $headers)) {
+            return response()->json(['error' => 'Invalid signature'], 401);
+        }
+
+        $gateway->handleWebhook($payload, $headers);
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Webhook PayPal
+     */
+    public function paypal(Request $request)
+    {
+        $payload = $request->json()->all();
+        $headers = $request->headers->all();
+        $headers = array_map(fn($v) => $v[0] ?? '', $headers);
+
+        $gateway = PaymentGatewayFactory::create(MethodePaiement::PAYPAL);
+
+        if (!$gateway->verifyWebhookSignature($payload, $headers)) {
+            return response()->json(['error' => 'Invalid signature'], 401);
+        }
+
+        $gateway->handleWebhook($payload, $headers);
+
+        return response()->json(['status' => 'ok']);
+    }
+}
+```
+
+---
+
+## 🔄 12. INTÉGRATION DANS LES SERVICES EXISTANTS
+
+### Mise à jour de `PaymentService` pour utiliser le Factory
+
+```php
+// Dans app/Services/PaymentService.php
+
+use App\Services\Payment\PaymentGatewayFactory;
+
+public function initierPaiement(Commande $commande, array $donnees): Paiement
+{
+    $methode = MethodePaiement::from($donnees['methode_paiement']);
+    
+    // Paiements internes (pas de gateway externe)
+    if (in_array($methode, [
+        MethodePaiement::PORTEFEUILLE,
+        MethodePaiement::CARTE_CADEAU,
+        MethodePaiement::ESPECES_LIVRAISON,
+    ])) {
+        return $this->initierPaiementInterne($commande, $methode, $donnees);
+    }
+
+    // Paiements via gateway externe
+    $gateway = PaymentGatewayFactory::create($methode);
+    $result = $gateway->initiate($commande, $donnees);
+
+    return Paiement::find($result['paiement_id']);
+}
+```
+
+### Mise à jour de `NotificationService` pour utiliser les vrais services
+
+```php
+// Dans app/Services/NotificationService.php
+
+use App\Services\Sms\SmsFactory;
+use App\Services\Notifications\FirebasePushService;
+
+private function envoyerSms(string $telephone, string $message): void
+{
+    try {
+        $smsSender = SmsFactory::create();
+        $smsSender->send($telephone, $message);
+    } catch (\Exception $e) {
+        Log::error("Erreur envoi SMS: {$e->getMessage()}");
+    }
+}
+
+private function envoyerPush(string $utilisateurId, string $titre, string $message): void
+{
+    try {
+        $pushService = app(FirebasePushService::class);
+        $pushService->sendToUser($utilisateurId, $titre, $message);
+    } catch (\Exception $e) {
+        Log::error("Erreur envoi push: {$e->getMessage()}");
+    }
+}
+```
+
