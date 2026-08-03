@@ -142,4 +142,44 @@ return [
         'project_id' => env('FIREBASE_PROJECT_ID'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Brevo (Email transactionnel)
+    |--------------------------------------------------------------------------
+    */
+    'brevo' => [
+        'api_key' => env('BREVO_API_KEY'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Cloudinary (Storage)
+    |--------------------------------------------------------------------------
+    */
+    'cloudinary' => [
+        'cloud_name' => env('CLOUDINARY_CLOUD_NAME'),
+        'api_key' => env('CLOUDINARY_API_KEY'),
+        'api_secret' => env('CLOUDINARY_API_SECRET'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Meilisearch (Search)
+    |--------------------------------------------------------------------------
+    */
+    'meilisearch' => [
+        'base_url' => env('MEILISEARCH_BASE_URL', 'http://localhost:7700'),
+        'api_key' => env('MEILISEARCH_API_KEY'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | DeepL (Translation)
+    |--------------------------------------------------------------------------
+    */
+    'deepl' => [
+        'api_key' => env('DEEPL_API_KEY'),
+        'environment' => env('DEEPL_ENVIRONMENT', 'free'), // free ou paid
+    ],
+
 ];
